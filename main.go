@@ -473,9 +473,9 @@ func main() {
 	iconData, err := os.ReadFile("build/appicon.png")
 	if err != nil {
 		log.Printf("warning: could not load tray icon: %v", err)
-	} else {
-		tray.SetIcon(iconData)
 	}
+	tray.SetIcon(iconData)
+	tray.SetLabel("")
 	tray.SetTooltip("Token Watch")
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
