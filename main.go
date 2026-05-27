@@ -157,14 +157,21 @@ func fetchClaudeUsage() *ProviderUsage {
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
 	time.Sleep(100 * time.Millisecond)
 
-	// 2. Send /usage
+	// 2. Clear scrollback history to prevent stale duplicates
+	exec.Command("tmux", "clear-history", "-t", sessionName).Run()
+
+	// 3. Send /usage
 	exec.Command("tmux", "send-keys", "-t", sessionName, "/usage", "Enter").Run()
 	time.Sleep(1 * time.Second) // Let dialog render
 
-	// 3. Capture screen
-	output := tmuxCapture(sessionName)
+	// 4. Capture only the visible pane (no scrollback)
+	out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+	if err != nil {
+		return nil
+	}
+	output := string(out)
 
-	// 4. Send Escape to close the dialog and keep the prompt clean for next iteration
+	// 5. Send Escape to close the dialog and keep the prompt clean for next iteration
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
 
 	if output == "" {
@@ -174,7 +181,7 @@ func fetchClaudeUsage() *ProviderUsage {
 }
 
 func tmuxCapture(session string) string {
-	out, err := exec.Command("tmux", "capture-pane", "-t", session, "-p", "-S", "-100").Output()
+	out, err := exec.Command("tmux", "capture-pane", "-t", session, "-p").Output()
 	if err != nil {
 		return ""
 	}
