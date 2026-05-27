@@ -20,6 +20,7 @@ A lightweight, native macOS menu bar app to monitor your AI token limits and usa
 ## Notes
 
 - Claude's `/usage` fetches data from Anthropic's API, which can occasionally be slow or unresponsive. When this happens, the UI shows a shimmer loading bar and falls back to the last known cached data.
+- If Claude's session authentication expires, `/usage` will hang on "Loading usage data…" indefinitely. Re-login to Claude to fix this.
 - Claude Code must run in your own terminal (not spawned by the app) to avoid macOS Keychain permission issues. The app simply reads from your active tmux session.
 
 ## Build and Run
