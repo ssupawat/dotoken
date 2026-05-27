@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Watch</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0e0f11;
+    --surface:   #16181c;
+    --border:    #ffffff0f;
+    --muted:     #ffffff22;
+    --text:      #e8e9ec;
+    --dim:       #6b7280;
+    --claude:    #d97757;
+    --openai:    #10a37f;
+    --zai:       #6c8eff;
+    --glow-c:    #d9775730;
+    --glow-o:    #10a37f28;
+    --glow-z:    #6c8eff28;
+  }
+
+  body {
+    background: transparent;
+    font-family: 'DM Sans', sans-serif;
+    width: 300px;
+    overflow: hidden;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  .popover {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .popover {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    padding: 16px 18px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    -webkit-app-region: drag;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logo {
+    width: 22px; height: 22px;
+    background: linear-gradient(135deg, #d97757, #6c8eff);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+  }
+
+  .title {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--text);
+    text-transform: uppercase;
+  }
+
+  .updated {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: color 0.2s;
+    -webkit-app-region: no-drag;
+  }
+  .updated:hover { color: var(--text); }
+
+  .refresh-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  /* ── Body ── */
+  .body { padding: 12px 0 4px; }
+
+  /* ── Section ── */
+  .section { padding: 4px 0 10px; }
+
+  .section-label {
+    padding: 0 18px 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+  }
+
+  /* ── Row ── */
+  .row {
+    padding: 5px 18px;
+    display: grid;
+    grid-template-columns: 72px 1fr 36px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .row-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+    font-weight: 300;
+  }
+
+  .bar-track {
+    height: 3px;
+    background: var(--muted);
+    border-radius: 99px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    position: relative;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .bar-fill::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 50%;
+    transform: translateY(-50%);
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: inherit;
+    filter: brightness(1.5);
+  }
+
+  /* provider colors */
+  .claude  .bar-fill { background: var(--claude); box-shadow: 0 0 6px var(--glow-c); }
+  .openai  .bar-fill { background: var(--openai); box-shadow: 0 0 6px var(--glow-o); }
+  .zai     .bar-fill { background: var(--zai);    box-shadow: 0 0 6px var(--glow-z); }
+
+  .row-pct {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-align: right;
+  }
+
+  .claude  .row-pct { color: var(--claude); }
+  .openai  .row-pct { color: var(--openai); }
+  .zai     .row-pct { color: var(--zai);    }
+
+  /* warn state */
+  .warn .bar-fill { background: #f59e0b; box-shadow: 0 0 6px #f59e0b30; }
+  .warn .row-pct  { color: #f59e0b; }
+  .crit .bar-fill { background: #ef4444; box-shadow: 0 0 6px #ef444430; }
+  .crit .row-pct  { color: #ef4444; }
+
+  /* ── Reset timer ── */
+  .reset-row {
+    padding: 3px 18px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .reset-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    font-style: italic;
+  }
+
+  .reset-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: #ffffff33;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 10px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    cursor: pointer;
+    transition: color 0.15s;
+    background: none;
+    border: none;
+    padding: 0;
+    letter-spacing: 0.06em;
+    -webkit-app-region: no-drag;
+  }
+  .footer-btn:hover { color: var(--text); }
+  .footer-btn.danger:hover { color: #ef4444; }
+
+  /* ── Loading & Settings ── */
+  .loading, .settings-view {
+    padding: 40px 18px;
+    text-align: center;
+    color: var(--dim);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+  }
+
+  .settings-view {
+    display: none;
+    text-align: left;
+    padding: 20px 18px;
+  }
+
+  .settings-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-bottom: 16px;
+    letter-spacing: 0.08em;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-label {
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    letter-spacing: 0.06em;
+  }
+
+  .form-input {
+    width: 100%;
+    background: #1c1e22;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    outline: none;
+  }
+  .form-input:focus {
+    border-color: #6c8eff;
+  }
+
+  .btn-save {
+    background: linear-gradient(135deg, #d97757, #6c8eff);
+    border: none;
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+  }
+  .btn-save:hover {
+    filter: brightness(1.1);
+  }
+
+  /* ── Noise overlay ── */
+  .popover::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<div class="popover">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">⬡</div>
+      <span class="title">Token Watch</span>
+    </div>
+    <div class="updated" onclick="refresh()">
+      <div class="refresh-dot"></div>
+      <span id="updated-text">loading...</span>
+    </div>
+  </div>
+
+  <div class="body" id="body">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <!-- Settings View -->
+  <div class="settings-view" id="settings-view">
+    <div class="settings-title">Settings</div>
+    <div class="form-group">
+      <label class="form-label" for="zai-token">Z.ai Token</label>
+      <input type="password" class="form-input" id="zai-token" placeholder="Paste Z.ai token...">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="claude-session">Claude Tmux Session</label>
+      <input type="text" class="form-input" id="claude-session" placeholder="e.g. tw-claude">
+    </div>
+    <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <button class="footer-btn" id="settings-btn" onclick="toggleSettings()">settings</button>
+    <span style="flex:1"></span>
+    <button class="footer-btn danger" onclick="quit()">quit</button>
+  </div>
+
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
