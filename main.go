@@ -177,7 +177,9 @@ func fetchClaudeUsage() *ProviderUsage {
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
 	time.Sleep(100 * time.Millisecond)
 
-	// 2. Clear scrollback history to prevent stale duplicates
+	// 2. Clear visible screen AND scrollback history
+	exec.Command("tmux", "send-keys", "-t", sessionName, "C-l").Run()
+	time.Sleep(200 * time.Millisecond)
 	exec.Command("tmux", "clear-history", "-t", sessionName).Run()
 
 	// 3. Send /usage
@@ -233,40 +235,59 @@ type usageBlock struct {
 	label string
 	pct   float64
 	reset string
+	key   string // "session" or "week"
 }
 
 func parseClaudeUsageOutput(output string) *ProviderUsage {
 	lines := strings.Split(output, "\n")
 	var blocks []usageBlock
+	seen := map[string]bool{} // track which labels we've seen
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		if strings.HasPrefix(trimmed, "Current session") ||
-			strings.HasPrefix(trimmed, "Current week") {
+		var labelKey string
+		if strings.HasPrefix(trimmed, "Current session") {
+			labelKey = "session"
+		} else if strings.HasPrefix(trimmed, "Current week") {
+			labelKey = "week"
+		}
+		if labelKey == "" {
+			continue
+		}
 
-			label := trimmed
-			for j := i + 1; j < i+5 && j < len(lines); j++ {
-				nextLine := strings.TrimSpace(lines[j])
-				if nextLine == "" {
-					continue
-				}
+		for j := i + 1; j < i+5 && j < len(lines); j++ {
+			nextLine := strings.TrimSpace(lines[j])
+			if nextLine == "" {
+				continue
+			}
 
-				if m := rePctUsed.FindStringSubmatch(nextLine); m != nil {
-					var pct float64
-					fmt.Sscanf(m[1], "%f", &pct)
-					blocks = append(blocks, usageBlock{label: label, pct: pct})
-					continue
-				}
-
-				if m := reResetsIn.FindStringSubmatch(nextLine); m != nil {
-					if len(blocks) > 0 {
-						blocks[len(blocks)-1].reset = strings.TrimSpace(m[1])
+			if m := rePctUsed.FindStringSubmatch(nextLine); m != nil {
+				var pct float64
+				fmt.Sscanf(m[1], "%f", &pct)
+				// Remove previous duplicate for this label, keep only the latest
+				for k := len(blocks) - 1; k >= 0; k-- {
+					if blocks[k].key == labelKey {
+						blocks = append(blocks[:k], blocks[k+1:]...)
 					}
-					break
 				}
+				blocks = append(blocks, usageBlock{label: trimmed, pct: pct, key: labelKey})
+				continue
+			}
+
+			if m := reResetsIn.FindStringSubmatch(nextLine); m != nil {
+				if len(blocks) > 0 {
+					blocks[len(blocks)-1].reset = strings.TrimSpace(m[1])
+				}
+				break
 			}
 		}
+
+		// Only parse first occurrence of each label prefix
+		if seen[labelKey] {
+			continue
+		}
+		seen[labelKey] = true
 	}
 
 	if len(blocks) == 0 {
