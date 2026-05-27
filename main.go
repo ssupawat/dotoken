@@ -422,16 +422,6 @@ func formatResetTime(epoch int64) string {
 	return t.Format("Jan _2 at 3:04pm")
 }
 
-func formatDuration(d time.Duration) string {
-	d = d.Round(time.Minute)
-	h := int(d.Hours())
-	m := int(d.Minutes()) % 60
-	if h > 0 {
-		return fmt.Sprintf("%dh %dm", h, m)
-	}
-	return fmt.Sprintf("%dm", m)
-}
-
 // ── Main ────────────────────────────────────────────────────
 
 func main() {

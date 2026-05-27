@@ -44,6 +44,13 @@ export function SaveSettings(zaiToken, claudeSession) {
     return $Call.ByID(1691659760, zaiToken, claudeSession);
 }
 
+/**
+ * @returns {$CancellablePromise<void>}
+ */
+export function StartPolling() {
+    return $Call.ByID(463951903);
+}
+
 // Private type creation functions
 const $$createType0 = $models.AllUsage.createFrom;
 const $$createType1 = $models.AppConfig.createFrom;
