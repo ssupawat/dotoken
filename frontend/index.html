@@ -185,6 +185,8 @@
   .warn .bar-fill { background: #f59e0b; box-shadow: 0 0 6px #f59e0b30; }
   .warn .row-pct  { color: #f59e0b; }
   .crit .bar-fill { background: #ef4444; box-shadow: 0 0 6px #ef444430; }
+  .loading-bar { background: linear-gradient(90deg, #333 25%, #555 50%, #333 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; width: 30%; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
   .crit .row-pct  { color: #ef4444; }
 
   /* ── Reset timer ── */

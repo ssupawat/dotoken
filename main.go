@@ -98,43 +98,59 @@ func (t *TokenWatch) QuitApp() {
 }
 
 var cachedUsage AllUsage
-
-func init() {
-	// Initial sync fetch on startup
-	refreshUsage()
-
-	// Refresh every 5 minutes in background
-	go func() {
-		for {
-			time.Sleep(5 * time.Minute)
-			refreshUsage()
-		}
-	}()
-}
+var appWindow *application.WebviewWindow
 
 func refreshUsage() {
 	var providers []ProviderUsage
+	var hasClaude bool
 
 	if claude := fetchClaudeUsage(); claude != nil {
 		providers = append(providers, *claude)
+		hasClaude = true
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
 	}
 
-	// If we got fresh data, update cache
+	// If Claude session is configured but no data yet, show loading placeholder
+	cfg := AppConfig{}
+	if data, err := os.ReadFile(getConfigPath()); err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+	if cfg.ClaudeSession != "" && !hasClaude {
+		providers = append([]ProviderUsage{{
+			Name:    "Claude",
+			Metrics: []Metric{{Label: "Session", Pct: -1}},
+			ResetIn: "loading…",
+		}}, providers...)
+	}
+
 	if len(providers) > 0 {
 		cachedUsage = AllUsage{
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
 		}
 	}
-	// If no fresh data, cachedUsage stays as-is (preserves previous values)
+
+	// Push updated cache to frontend
+	if appWindow != nil {
+		appWindow.EmitEvent("usage", cachedUsage)
+	}
 }
 
 func (t *TokenWatch) FetchUsage() AllUsage {
 	go refreshUsage()
 	return cachedUsage
+}
+
+func (t *TokenWatch) StartPolling() {
+	go refreshUsage()
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			refreshUsage()
+		}
+	}()
 }
 
 // ── Claude (tmux /usage) ──────────────────────────────────
@@ -412,7 +428,7 @@ func main() {
 		},
 	})
 
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	appWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "Token Watch",
 		Width:     300,
 		Height:    400,
@@ -441,7 +457,7 @@ func main() {
 	}
 	tray.SetTooltip("Token Watch")
 
-	tray.AttachWindow(window).WindowOffset(5)
+	tray.AttachWindow(appWindow).WindowOffset(5)
 
 	menu := app.NewMenu()
 	menu.Add("Quit").OnClick(func(ctx *application.Context) {

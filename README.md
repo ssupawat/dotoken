@@ -17,6 +17,11 @@ A lightweight, native macOS menu bar app to monitor your AI token limits and usa
 1. **Z.ai**: Calls the Z.ai limit API with your custom token.
 2. **Claude**: Hooks into an active local `tmux` session (e.g. `tw-claude`) running Claude Code, sends `/usage`, captures the plan bars, and closes the dialog seamlessly under 1 second. This completely bypasses background macOS Keychain authorization locks.
 
+## Notes
+
+- Claude's `/usage` fetches data from Anthropic's API, which can occasionally be slow or unresponsive. When this happens, the UI shows a shimmer loading bar and falls back to the last known cached data.
+- Claude Code must run in your own terminal (not spawned by the app) to avoid macOS Keychain permission issues. The app simply reads from your active tmux session.
+
 ## Build and Run
 
 1. Install [Wails v3](https://v3.wails.io/):

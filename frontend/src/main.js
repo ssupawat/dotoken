@@ -1,4 +1,5 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp } from '../bindings/tokenwatch/tokenwatch.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp, StartPolling } from '../bindings/tokenwatch/tokenwatch.js'
+import { Events } from '@wailsio/runtime'
 
 function pctLevel(pct) {
   if (pct >= 90) return 'crit';
@@ -21,6 +22,16 @@ function providerClass(name) {
 }
 
 function renderMetric(m, providerClass) {
+  // Loading state (pct === -1)
+  if (m.pct === -1) {
+    return `
+      <div class="row ${providerClass}">
+        <span class="row-label">${m.label}</span>
+        <div class="bar-track"><div class="bar-fill loading-bar"></div></div>
+        <span class="row-pct" style="color:var(--dim);font-size:9px">…</span>
+      </div>`;
+  }
+
   const level = pctLevel(m.pct);
   const cls = [providerClass, level].filter(Boolean).join(' ');
 
@@ -154,6 +165,15 @@ function quit() {
   QuitApp();
 }
 
+// Listen for real-time usage updates from Go backend
+Events.On("usage", (event) => {
+  const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+  render(data);
+});
+
 // Initial load
 refresh();
+
+// Start background polling (5 min intervals)
+StartPolling();
 
