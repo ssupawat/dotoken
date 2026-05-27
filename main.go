@@ -122,10 +122,14 @@ func refreshUsage() {
 		providers = append(providers, *zai)
 	}
 
-	cachedUsage = AllUsage{
-		UpdatedAt: time.Now().Format("15:04:05"),
-		Providers: providers,
+	// If we got fresh data, update cache
+	if len(providers) > 0 {
+		cachedUsage = AllUsage{
+			UpdatedAt: time.Now().Format("15:04:05"),
+			Providers: providers,
+		}
 	}
+	// If no fresh data, cachedUsage stays as-is (preserves previous values)
 }
 
 func (t *TokenWatch) FetchUsage() AllUsage {
@@ -162,17 +166,33 @@ func fetchClaudeUsage() *ProviderUsage {
 
 	// 3. Send /usage
 	exec.Command("tmux", "send-keys", "-t", sessionName, "/usage", "Enter").Run()
-	time.Sleep(1 * time.Second) // Let dialog render
 
-	// 4. Capture only the visible pane (no scrollback)
-	out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
-	if err != nil {
-		return nil
+	// 4. Poll until we see "% used" or timeout after 10s
+	var output string
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+		if err != nil {
+			continue
+		}
+		output = string(out)
+		if strings.Contains(output, "% used") {
+			break
+		}
+		// If dialog was dismissed (no loading, no data), bail out
+		if !strings.Contains(output, "Loading") && i > 1 {
+			break
+		}
 	}
-	output := string(out)
 
 	// 5. Send Escape to close the dialog and keep the prompt clean for next iteration
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+
+	// 6. If no percentage data found, return cache as-is
+	if !strings.Contains(output, "% used") {
+		// Return nil so refreshUsage() keeps the existing cache
+		return nil
+	}
 
 	if output == "" {
 		return nil

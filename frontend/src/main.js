@@ -68,7 +68,7 @@ function render(data) {
 
   if (!data.providers || data.providers.length === 0) {
     document.getElementById('body').innerHTML = `
-      <div class="loading">No usage data found.<br>Set ZAI_TOKEN env for Z.ai.</div>`;
+      <div class="loading">Loading usage data…<br><span style="font-size:10px;color:var(--dim)">first fetch may take a moment</span></div>`;
     return;
   }
 
