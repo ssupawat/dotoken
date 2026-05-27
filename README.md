@@ -2,7 +2,7 @@
 
 A lightweight, native macOS menu bar app to monitor your AI token limits and usage in real-time.
 
-![Screenshot](https://github.com/ssupawat/tokenwatch/raw/main/build/appicon.png)
+![Screenshot](https://github.com/ssupawat/tokenwatch/raw/main/build/screenshot.png)
 
 ## Features
 
