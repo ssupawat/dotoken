@@ -31,5 +31,5 @@ A lightweight, native macOS menu bar app to monitor your AI token limits and usa
 
 3. Run the binary:
    ```bash
-   ./bin/tokenwatch
+   ./bin/tokenwatch &
    ```
