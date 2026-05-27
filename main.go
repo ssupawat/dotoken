@@ -475,8 +475,6 @@ func main() {
 		log.Printf("warning: could not load tray icon: %v", err)
 	}
 	tray.SetIcon(iconData)
-	tray.SetLabel("")
-	tray.SetTooltip("Token Watch")
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
 
