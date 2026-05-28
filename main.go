@@ -177,6 +177,13 @@ func fetchClaudeUsage() *ProviderUsage {
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
 	time.Sleep(100 * time.Millisecond)
 
+	// Dismiss satisfaction survey if present
+	out, _ := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+	if strings.Contains(string(out), "How is Claude") {
+		exec.Command("tmux", "send-keys", "-t", sessionName, "0").Run()
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	// 2. Clear visible screen AND scrollback history
 	exec.Command("tmux", "send-keys", "-t", sessionName, "C-l").Run()
 	time.Sleep(200 * time.Millisecond)
@@ -197,6 +204,7 @@ func fetchClaudeUsage() *ProviderUsage {
 		if strings.Contains(output, "% used") {
 			break
 		}
+
 		// If dialog was dismissed (no loading, no data), bail out
 		if !strings.Contains(output, "Loading") && i > 1 {
 			break
@@ -208,7 +216,6 @@ func fetchClaudeUsage() *ProviderUsage {
 
 	// 6. If no percentage data found, return cache as-is
 	if !strings.Contains(output, "% used") {
-		// Return nil so refreshUsage() keeps the existing cache
 		return nil
 	}
 
@@ -216,14 +223,6 @@ func fetchClaudeUsage() *ProviderUsage {
 		return nil
 	}
 	return parseClaudeUsageOutput(output)
-}
-
-func tmuxCapture(session string) string {
-	out, err := exec.Command("tmux", "capture-pane", "-t", session, "-p").Output()
-	if err != nil {
-		return ""
-	}
-	return string(out)
 }
 
 var (
@@ -241,22 +240,26 @@ type usageBlock struct {
 func parseClaudeUsageOutput(output string) *ProviderUsage {
 	lines := strings.Split(output, "\n")
 	var blocks []usageBlock
-	seen := map[string]bool{} // track which labels we've seen
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		var labelKey string
+		var shortLabel string
 		if strings.HasPrefix(trimmed, "Current session") {
 			labelKey = "session"
+			shortLabel = "Session"
 		} else if strings.HasPrefix(trimmed, "Current week") {
 			labelKey = "week"
+			shortLabel = "Weekly"
 		}
 		if labelKey == "" {
 			continue
 		}
 
-		for j := i + 1; j < i+5 && j < len(lines); j++ {
+		var resetAcc string
+		foundPct := false
+		for j := i + 1; j < i+8 && j < len(lines); j++ {
 			nextLine := strings.TrimSpace(lines[j])
 			if nextLine == "" {
 				continue
@@ -265,29 +268,32 @@ func parseClaudeUsageOutput(output string) *ProviderUsage {
 			if m := rePctUsed.FindStringSubmatch(nextLine); m != nil {
 				var pct float64
 				fmt.Sscanf(m[1], "%f", &pct)
-				// Remove previous duplicate for this label, keep only the latest
+				// Remove previous duplicate for this label
 				for k := len(blocks) - 1; k >= 0; k-- {
 					if blocks[k].key == labelKey {
 						blocks = append(blocks[:k], blocks[k+1:]...)
 					}
 				}
-				blocks = append(blocks, usageBlock{label: trimmed, pct: pct, key: labelKey})
+				blocks = append(blocks, usageBlock{label: shortLabel, pct: pct, key: labelKey, reset: resetAcc})
+				foundPct = true
 				continue
 			}
 
-			if m := reResetsIn.FindStringSubmatch(nextLine); m != nil {
-				if len(blocks) > 0 {
+			// After finding % used, keep scanning for reset time
+			if foundPct {
+				if m := reResetsIn.FindStringSubmatch(nextLine); m != nil {
 					blocks[len(blocks)-1].reset = strings.TrimSpace(m[1])
+					break
 				}
-				break
+				if strings.HasPrefix(nextLine, "Current session") || strings.HasPrefix(nextLine, "Current week") {
+					break
+				}
+			} else {
+				if m := reResetsIn.FindStringSubmatch(nextLine); m != nil {
+					resetAcc += " " + strings.TrimSpace(m[1])
+				}
 			}
 		}
-
-		// Only parse first occurrence of each label prefix
-		if seen[labelKey] {
-			continue
-		}
-		seen[labelKey] = true
 	}
 
 	if len(blocks) == 0 {
@@ -298,15 +304,8 @@ func parseClaudeUsageOutput(output string) *ProviderUsage {
 	var resetStr string
 
 	for _, b := range blocks {
-		shortLabel := b.label
-		if strings.HasPrefix(b.label, "Current session") {
-			shortLabel = "Session"
-		} else if strings.HasPrefix(b.label, "Current week") {
-			shortLabel = "Weekly"
-		}
-
 		metrics = append(metrics, Metric{
-			Label: shortLabel,
+			Label: b.label,
 			Pct:   b.pct,
 		})
 
