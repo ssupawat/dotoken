@@ -460,11 +460,18 @@ func main() {
 	// System tray
 	tray := app.SystemTray.New()
 
-	iconData, err := os.ReadFile("build/appicon.png")
+	// Resolve icon path relative to binary location
+	var iconData []byte
+	exePath, err := os.Executable()
+	if err == nil {
+		iconPath := filepath.Join(filepath.Dir(exePath), "..", "build", "appicon.png")
+		iconData, err = os.ReadFile(iconPath)
+	}
 	if err != nil {
 		log.Printf("warning: could not load tray icon: %v", err)
+	} else {
+		tray.SetIcon(iconData)
 	}
-	tray.SetIcon(iconData)
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
 
