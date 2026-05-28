@@ -35,7 +35,9 @@ A lightweight, native macOS menu bar app to monitor your AI token limits and usa
    wails3 build
    ```
 
-3. Run the binary:
+3. Run the binary (detached from terminal):
    ```bash
-   ./bin/tokenwatch &
+   nohup ./bin/tokenwatch &
    ```
+
+   Closing your terminal won't kill the app. Use `pkill -f tokenwatch` to stop it.
