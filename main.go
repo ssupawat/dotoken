@@ -208,80 +208,48 @@ func fetchClaudeUsage() *ProviderUsage {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// 1b. Wait for Claude to be idle (clean prompt, not processing)
-	for i := 0; i < 15; i++ {
-		out, _ := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
-		screen := string(out)
-		lines := strings.Split(screen, "\n")
-		lastNonEmpty := ""
-		for j := len(lines) - 1; j >= 0; j-- {
-			if strings.TrimSpace(lines[j]) != "" {
-				lastNonEmpty = strings.TrimSpace(lines[j])
-				break
-			}
-		}
-		// Idle = last non-empty line is the prompt indicator (contains tokens or ⚡)
-		if strings.Contains(lastNonEmpty, "tokens") || strings.Contains(lastNonEmpty, "⚡") {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	// 1c. Send Escape to clear any pending input, then C-l to redraw
-	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
-	time.Sleep(100 * time.Millisecond)
-	exec.Command("tmux", "send-keys", "-t", sessionName, "C-u").Run()
-	time.Sleep(100 * time.Millisecond)
-	exec.Command("tmux", "clear-history", "-t", sessionName).Run()
-
-	// 2. Send /usage
-	exec.Command("tmux", "send-keys", "-t", sessionName, "/usage", "Enter").Run()
-
-	// 4. Poll until we see "% used" or timeout after 10s
+	// 2. Try /usage up to 2 times (handles dismissed case)
 	var output string
-	for i := 0; i < 20; i++ {
-		time.Sleep(500 * time.Millisecond)
-		out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
-		if err != nil {
-			continue
-		}
-		output = string(out)
+	for attempt := 0; attempt < 2; attempt++ {
+		exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+		time.Sleep(100 * time.Millisecond)
+		exec.Command("tmux", "send-keys", "-t", sessionName, "C-u").Run()
+		time.Sleep(100 * time.Millisecond)
+		exec.Command("tmux", "clear-history", "-t", sessionName).Run()
 
-		// Only check for "% used" in lines AFTER the last "❯ /usage"
-		lines := strings.Split(output, "\n")
-		lastUsageIdx := -1
-		for j, line := range lines {
-			if strings.TrimSpace(line) == "❯ /usage" {
-				lastUsageIdx = j
+		exec.Command("tmux", "send-keys", "-t", sessionName, "/usage", "Enter").Run()
+
+		for i := 0; i < 10; i++ {
+			time.Sleep(500 * time.Millisecond)
+			out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+			if err != nil {
+				continue
 			}
-		}
-		if lastUsageIdx >= 0 {
-			fresh := strings.Join(lines[lastUsageIdx+1:], "\n")
-			if strings.Contains(fresh, "% used") {
-				break
+			output = string(out)
+			lines := strings.Split(output, "\n")
+			lastUsageIdx := -1
+			for j, line := range lines {
+				if strings.TrimSpace(line) == "❯ /usage" {
+					lastUsageIdx = j
+				}
 			}
-			// If dismissed in fresh section (no Loading, no data), bail
-			if strings.Contains(fresh, "dismissed") && !strings.Contains(fresh, "Loading") {
-				break
+			if lastUsageIdx >= 0 {
+				fresh := strings.Join(lines[lastUsageIdx+1:], "\n")
+				if strings.Contains(fresh, "% used") || strings.Contains(fresh, "dismissed") {
+					break
+				}
 			}
 		}
 
-		// Global bail: if no Loading anywhere and past initial polls
-		if !strings.Contains(output, "Loading") && i > 3 {
+		exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+		time.Sleep(100 * time.Millisecond)
+
+		if strings.Contains(output, "% used") {
 			break
 		}
 	}
 
-	// 5. Send Escape to close the dialog and keep the prompt clean for next iteration
-	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
-	time.Sleep(100 * time.Millisecond)
-
-	// 6. If no percentage data found, return cache as-is
 	if !strings.Contains(output, "% used") {
-		return nil
-	}
-
-	if output == "" {
 		return nil
 	}
 	return parseClaudeUsageOutput(output)
