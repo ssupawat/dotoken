@@ -8,6 +8,16 @@ A lightweight macOS menu bar app to monitor AI usage limits in real-time.
 - **OpenCode Go** — 5h rolling, weekly, monthly via web API
 - **Z.ai** — queries & token limits via API
 
+## Install
+
+```bash
+curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | bash
+```
+
+> On first run, macOS may show "cannot be opened because it is from an unidentified developer." Right-click the binary → Open → click Open to bypass Gatekeeper.
+
+> For auto-start on login, add `dotoken` to **System Settings → General → Login Items**.
+
 ## Settings
 
 Config file: `~/.dotoken.json`

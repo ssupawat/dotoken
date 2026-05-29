@@ -21,6 +21,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var iconData []byte
+
 // ── Data types ───────────────────────────────────────────────
 
 type ProviderUsage struct {
@@ -608,18 +611,7 @@ func main() {
 	// System tray
 	tray := app.SystemTray.New()
 
-	// Resolve icon path relative to binary location
-	var iconData []byte
-	exePath, err := os.Executable()
-	if err == nil {
-		iconPath := filepath.Join(filepath.Dir(exePath), "..", "build", "appicon.png")
-		iconData, err = os.ReadFile(iconPath)
-	}
-	if err != nil {
-		log.Printf("warning: could not load tray icon: %v", err)
-	} else {
-		tray.SetIcon(iconData)
-	}
+	tray.SetIcon(iconData)
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
 
@@ -629,7 +621,7 @@ func main() {
 	})
 	tray.SetMenu(menu)
 
-	err = app.Run()
+	err := app.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
