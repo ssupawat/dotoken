@@ -14,7 +14,7 @@ import * as $models from "./models.js";
  * @returns {$CancellablePromise<$models.AllUsage>}
  */
 export function FetchUsage() {
-    return $Call.ByID(3126757199).then(/** @type {($result: any) => any} */(($result) => {
+    return $Call.ByID(749438405).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType0($result);
     }));
 }
@@ -23,7 +23,7 @@ export function FetchUsage() {
  * @returns {$CancellablePromise<$models.AppConfig>}
  */
 export function GetSettings() {
-    return $Call.ByID(3456757617).then(/** @type {($result: any) => any} */(($result) => {
+    return $Call.ByID(4121742087).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType1($result);
     }));
 }
@@ -32,7 +32,7 @@ export function GetSettings() {
  * @returns {$CancellablePromise<void>}
  */
 export function QuitApp() {
-    return $Call.ByID(437051418);
+    return $Call.ByID(310939844);
 }
 
 /**
@@ -42,7 +42,7 @@ export function QuitApp() {
  * @returns {$CancellablePromise<void>}
  */
 export function SaveSettings(zaiToken, claudeSession, openCodeCookie) {
-    return $Call.ByID(1691659760, zaiToken, claudeSession, openCodeCookie);
+    return $Call.ByID(1381577550, zaiToken, claudeSession, openCodeCookie);
 }
 
 /**
@@ -50,7 +50,7 @@ export function SaveSettings(zaiToken, claudeSession, openCodeCookie) {
  * @returns {$CancellablePromise<void>}
  */
 export function StartPolling() {
-    return $Call.ByID(463951903);
+    return $Call.ByID(1366391425);
 }
 
 // Private type creation functions

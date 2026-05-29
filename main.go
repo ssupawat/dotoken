@@ -48,9 +48,9 @@ func init() {
 	application.RegisterEvent[AllUsage]("usage")
 }
 
-// ── TokenWatch service (bound to frontend) ─────────────────
+// ── DoToken service (bound to frontend) ─────────────────
 
-type TokenWatch struct{}
+type DoToken struct{}
 
 type AppConfig struct {
 	ZaiToken        string `json:"zaiToken"`
@@ -60,10 +60,10 @@ type AppConfig struct {
 
 func getConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".tokenwatch.json")
+	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *TokenWatch) SaveSettings(zaiToken, claudeSession, openCodeCookie string) error {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) error {
 	// Verify tmux session exists if provided
 	if claudeSession != "" {
 		cmd := exec.Command("tmux", "has-session", "-t", claudeSession)
@@ -84,7 +84,7 @@ func (t *TokenWatch) SaveSettings(zaiToken, claudeSession, openCodeCookie string
 	return err
 }
 
-func (t *TokenWatch) GetSettings() AppConfig {
+func (t *DoToken) GetSettings() AppConfig {
 	data, err := os.ReadFile(getConfigPath())
 	if err != nil {
 		return AppConfig{}
@@ -96,7 +96,7 @@ func (t *TokenWatch) GetSettings() AppConfig {
 	return cfg
 }
 
-func (t *TokenWatch) QuitApp() {
+func (t *DoToken) QuitApp() {
 	os.Exit(0)
 }
 
@@ -173,18 +173,18 @@ func refreshUsage() {
 	}()
 }
 
-func (t *TokenWatch) FetchUsage() AllUsage {
+func (t *DoToken) FetchUsage() AllUsage {
 	go refreshUsage()
 	return cachedUsage
 }
 
 // StartPolling is kept for compatibility but does nothing
-func (t *TokenWatch) StartPolling() {}
+func (t *DoToken) StartPolling() {}
 
 // ── Claude (tmux /usage) ──────────────────────────────────
 
 func fetchClaudeUsage() *ProviderUsage {
-	sessionName := (&TokenWatch{}).GetSettings().ClaudeSession
+	sessionName := (&DoToken{}).GetSettings().ClaudeSession
 	if sessionName == "" {
 		return nil
 	}
@@ -388,7 +388,7 @@ func parseClaudeUsageOutput(output string) *ProviderUsage {
 func fetchOpenCodeUsage() *ProviderUsage {
 	token := os.Getenv("OPENCODE_AUTH_COOKIE")
 	if token == "" {
-		token = (&TokenWatch{}).GetSettings().OpenCodeCookie
+		token = (&DoToken{}).GetSettings().OpenCodeCookie
 	}
 	if token == "" {
 		return nil
@@ -479,7 +479,7 @@ type zaiResponse struct {
 func fetchZaiUsage() *ProviderUsage {
 	token := os.Getenv("ZAI_TOKEN")
 	if token == "" {
-		token = (&TokenWatch{}).GetSettings().ZaiToken
+		token = (&DoToken{}).GetSettings().ZaiToken
 	}
 	if token == "" {
 		return nil
@@ -566,10 +566,10 @@ func formatResetTime(epoch int64) string {
 
 func main() {
 	app := application.New(application.Options{
-		Name:        "Token Watch",
+		Name:        "DoToken",
 		Description: "AI token usage monitor",
 		Services: []application.Service{
-			application.NewService(&TokenWatch{}),
+			application.NewService(&DoToken{}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -580,7 +580,7 @@ func main() {
 	})
 
 	appWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "Token Watch",
+		Title:     "DoToken",
 		Width:     300,
 		Height:    400,
 		Frameless: true,

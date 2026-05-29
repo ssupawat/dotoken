@@ -1,4 +1,4 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp } from '../bindings/tokenwatch/tokenwatch.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp } from '../bindings/dotoken/dotoken.js'
 import { Events } from '@wailsio/runtime'
 
 function pctLevel(pct) {

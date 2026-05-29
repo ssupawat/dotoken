@@ -8,7 +8,7 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as main$0 from "../../../../../tokenwatch/models.js";
+import * as main$0 from "../../../../../dotoken/models.js";
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
