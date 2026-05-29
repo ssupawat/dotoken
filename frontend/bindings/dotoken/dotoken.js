@@ -47,7 +47,7 @@ export function SaveProviderOrder(order) {
  * @param {string} zaiToken
  * @param {string} claudeSession
  * @param {string} openCodeCookie
- * @returns {$CancellablePromise<void>}
+ * @returns {$CancellablePromise<string>}
  */
 export function SaveSettings(zaiToken, claudeSession, openCodeCookie) {
     return $Call.ByID(1381577550, zaiToken, claudeSession, openCodeCookie);
