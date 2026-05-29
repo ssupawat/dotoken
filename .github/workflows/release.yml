@@ -26,9 +26,6 @@ jobs:
       - name: Install frontend deps
         run: cd frontend && npm install
 
-      - name: Prepare build assets
-        run: cp assets/appicon.png build/appicon.png
-
       - name: Build
         run: wails3 build
 

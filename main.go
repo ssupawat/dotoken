@@ -21,7 +21,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed assets/appicon.png
+//go:embed build/appicon.png
 var iconData []byte
 
 // ── Data types ───────────────────────────────────────────────
