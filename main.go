@@ -4,8 +4,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,8 +53,9 @@ func init() {
 type TokenWatch struct{}
 
 type AppConfig struct {
-	ZaiToken      string `json:"zaiToken"`
-	ClaudeSession string `json:"claudeSession"`
+	ZaiToken        string `json:"zaiToken"`
+	ClaudeSession   string `json:"claudeSession"`
+	OpenCodeCookie  string `json:"openCodeCookie"`
 }
 
 func getConfigPath() string {
@@ -60,7 +63,7 @@ func getConfigPath() string {
 	return filepath.Join(home, ".tokenwatch.json")
 }
 
-func (t *TokenWatch) SaveSettings(zaiToken, claudeSession string) error {
+func (t *TokenWatch) SaveSettings(zaiToken, claudeSession, openCodeCookie string) error {
 	// Verify tmux session exists if provided
 	if claudeSession != "" {
 		cmd := exec.Command("tmux", "has-session", "-t", claudeSession)
@@ -69,7 +72,7 @@ func (t *TokenWatch) SaveSettings(zaiToken, claudeSession string) error {
 		}
 	}
 
-	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession}
+	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession, OpenCodeCookie: openCodeCookie}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -101,13 +104,8 @@ var cachedUsage AllUsage
 var appWindow *application.WebviewWindow
 
 func refreshUsage() {
+	// Fetch fast providers first, emit immediately
 	var providers []ProviderUsage
-	var hasClaude bool
-
-	if claude := fetchClaudeUsage(); claude != nil {
-		providers = append(providers, *claude)
-		hasClaude = true
-	}
 	if oc := fetchOpenCodeUsage(); oc != nil {
 		providers = append(providers, *oc)
 	}
@@ -115,17 +113,27 @@ func refreshUsage() {
 		providers = append(providers, *zai)
 	}
 
-	// If Claude session is configured but no data yet, show loading placeholder
+	// Claude: use cached data if available, otherwise show loading placeholder
 	cfg := AppConfig{}
 	if data, err := os.ReadFile(getConfigPath()); err == nil {
 		json.Unmarshal(data, &cfg)
 	}
-	if cfg.ClaudeSession != "" && !hasClaude {
-		providers = append([]ProviderUsage{{
-			Name:    "Claude",
-			Metrics: []Metric{{Label: "Session", Pct: -1}},
-			ResetIn: "loading…",
-		}}, providers...)
+	if cfg.ClaudeSession != "" {
+		hasClaudeCache := false
+		for _, p := range cachedUsage.Providers {
+			if p.Name == "Claude" {
+				providers = append([]ProviderUsage{p}, providers...)
+				hasClaudeCache = true
+				break
+			}
+		}
+		if !hasClaudeCache {
+			providers = append([]ProviderUsage{{
+				Name:    "Claude",
+				Metrics: []Metric{{Label: "Session", Pct: -1}},
+				ResetIn: "loading…",
+			}}, providers...)
+		}
 	}
 
 	if len(providers) > 0 {
@@ -133,12 +141,36 @@ func refreshUsage() {
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
 		}
+		if appWindow != nil {
+			appWindow.EmitEvent("usage", cachedUsage)
+		}
 	}
 
-	// Push updated cache to frontend
-	if appWindow != nil {
-		appWindow.EmitEvent("usage", cachedUsage)
-	}
+	// Fetch Claude in background, emit again when done
+	go func() {
+		claude := fetchClaudeUsage()
+		if claude == nil {
+			return
+		}
+
+		// Replace placeholder with real data
+		for i, p := range cachedUsage.Providers {
+			if p.Name == "Claude" {
+				cachedUsage.Providers[i] = *claude
+				cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
+				if appWindow != nil {
+					appWindow.EmitEvent("usage", cachedUsage)
+			}
+				return
+			}
+		}
+		// Claude wasn't in cache yet, prepend it
+		cachedUsage.Providers = append([]ProviderUsage{*claude}, cachedUsage.Providers...)
+		cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
+		if appWindow != nil {
+			appWindow.EmitEvent("usage", cachedUsage)
+		}
+	}()
 }
 
 func (t *TokenWatch) FetchUsage() AllUsage {
@@ -146,15 +178,8 @@ func (t *TokenWatch) FetchUsage() AllUsage {
 	return cachedUsage
 }
 
-func (t *TokenWatch) StartPolling() {
-	go refreshUsage()
-	go func() {
-		for {
-			time.Sleep(5 * time.Minute)
-			refreshUsage()
-		}
-	}()
-}
+// StartPolling is kept for compatibility but does nothing
+func (t *TokenWatch) StartPolling() {}
 
 // ── Claude (tmux /usage) ──────────────────────────────────
 
@@ -176,25 +201,40 @@ func fetchClaudeUsage() *ProviderUsage {
 		}
 	}
 
-	// 1. Send Escape to ensure clean prompt state
-	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
-	time.Sleep(100 * time.Millisecond)
-
-	// Dismiss satisfaction survey if present
+	// 1. Dismiss satisfaction survey if present
 	out, _ := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
 	if strings.Contains(string(out), "How is Claude") {
 		exec.Command("tmux", "send-keys", "-t", sessionName, "0").Run()
 		time.Sleep(500 * time.Millisecond)
-		exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
-		time.Sleep(100 * time.Millisecond)
 	}
 
-	// 2. Clear visible screen AND scrollback history
-	exec.Command("tmux", "send-keys", "-t", sessionName, "C-l").Run()
-	time.Sleep(200 * time.Millisecond)
+	// 1b. Wait for Claude to be idle (clean prompt, not processing)
+	for i := 0; i < 15; i++ {
+		out, _ := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+		screen := string(out)
+		lines := strings.Split(screen, "\n")
+		lastNonEmpty := ""
+		for j := len(lines) - 1; j >= 0; j-- {
+			if strings.TrimSpace(lines[j]) != "" {
+				lastNonEmpty = strings.TrimSpace(lines[j])
+				break
+			}
+		}
+		// Idle = last non-empty line is the prompt indicator (contains tokens or ⚡)
+		if strings.Contains(lastNonEmpty, "tokens") || strings.Contains(lastNonEmpty, "⚡") {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// 1c. Send Escape to clear any pending input, then C-l to redraw
+	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+	time.Sleep(100 * time.Millisecond)
+	exec.Command("tmux", "send-keys", "-t", sessionName, "C-u").Run()
+	time.Sleep(100 * time.Millisecond)
 	exec.Command("tmux", "clear-history", "-t", sessionName).Run()
 
-	// 3. Send /usage
+	// 2. Send /usage
 	exec.Command("tmux", "send-keys", "-t", sessionName, "/usage", "Enter").Run()
 
 	// 4. Poll until we see "% used" or timeout after 10s
@@ -206,18 +246,35 @@ func fetchClaudeUsage() *ProviderUsage {
 			continue
 		}
 		output = string(out)
-		if strings.Contains(output, "% used") {
-			break
+
+		// Only check for "% used" in lines AFTER the last "❯ /usage"
+		lines := strings.Split(output, "\n")
+		lastUsageIdx := -1
+		for j, line := range lines {
+			if strings.TrimSpace(line) == "❯ /usage" {
+				lastUsageIdx = j
+			}
+		}
+		if lastUsageIdx >= 0 {
+			fresh := strings.Join(lines[lastUsageIdx+1:], "\n")
+			if strings.Contains(fresh, "% used") {
+				break
+			}
+			// If dismissed in fresh section (no Loading, no data), bail
+			if strings.Contains(fresh, "dismissed") && !strings.Contains(fresh, "Loading") {
+				break
+			}
 		}
 
-		// If dialog was dismissed (no loading, no data), bail out
-		if !strings.Contains(output, "Loading") && i > 1 {
+		// Global bail: if no Loading anywhere and past initial polls
+		if !strings.Contains(output, "Loading") && i > 3 {
 			break
 		}
 	}
 
 	// 5. Send Escape to close the dialog and keep the prompt clean for next iteration
 	exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+	time.Sleep(100 * time.Millisecond)
 
 	// 6. If no percentage data found, return cache as-is
 	if !strings.Contains(output, "% used") {
@@ -326,67 +383,77 @@ func parseClaudeUsageOutput(output string) *ProviderUsage {
 	}
 }
 
-// ── OpenCode Go (local SQLite) ────────────────────────────
-
-// OpenCode Go limits (dollar-based)
-const (
-	ocRollingLimit = 12.0 // 5-hour rolling window
-	ocWeeklyLimit  = 30.0 // per week
-	ocMonthlyLimit = 60.0 // per month
-)
+// ── OpenCode Go (web scraping) ──────────────────────────
 
 func fetchOpenCodeUsage() *ProviderUsage {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+	token := os.Getenv("OPENCODE_AUTH_COOKIE")
+	if token == "" {
+		token = (&TokenWatch{}).GetSettings().OpenCodeCookie
 	}
-	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil // no OpenCode DB, skip silently
-	}
-
-	now := time.Now()
-	fiveHrAgoMs := now.Add(-5 * time.Hour).UnixMilli()
-	weekStartMs := time.Date(now.Year(), now.Month(), now.Day()-int(now.Weekday()), 0, 0, 0, 0, now.Location()).UnixMilli()
-	monthStartMs := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).UnixMilli()
-
-	// Query rolling + weekly + monthly costs in one pass
-	query := fmt.Sprintf(`
-		SELECT
-			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END),
-			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END),
-			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END)
-		FROM message
-		WHERE json_extract(data, '$.providerID') = 'opencode-go'
-		  AND json_extract(data, '$.cost') IS NOT NULL
-		  AND json_extract(data, '$.role') = 'assistant'
-	`, fiveHrAgoMs, weekStartMs, monthStartMs)
-
-	out, err := exec.Command("sqlite3", "-separator", " ", dbPath, query).Output()
-	if err != nil {
-		log.Printf("opencode: sqlite query failed: %v", err)
+	if token == "" {
 		return nil
 	}
 
-	var rollingCost, weeklyCost, monthlyCost float64
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%f %f %f", &rollingCost, &weeklyCost, &monthlyCost)
+	serverID := "c7389bd0e731f80f49593e5ee53835475f4e28594dd6bd83eb229bab753498cd"
+	args := `{"t":{"t":9,"i":0,"l":1,"a":[{"t":1,"s":"wrk_01KSQKC93GMP038V8J9RBEFM8D"}],"o":0},"f":31,"m":[]}`
+	url := fmt.Sprintf("https://opencode.ai/_server?id=%s&args=%s", serverID, url.QueryEscape(args))
 
-	metrics := []Metric{
-		{Label: "5h rolling", Pct: rollingCost / ocRollingLimit * 100},
-		{Label: "Weekly", Pct: weeklyCost / ocWeeklyLimit * 100},
-		{Label: "Monthly", Pct: monthlyCost / ocMonthlyLimit * 100},
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Cookie", "auth="+token)
+	req.Header.Set("X-Server-Id", serverID)
+	req.Header.Set("X-Server-Instance", "server-fn:8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("opencode: request failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
 	}
 
-	// Reset time: find nearest reset
-	// Rolling resets ~5h from first message; weekly resets next Sunday; monthly resets 1st
+	text := string(body)
+
+	// Parse rollingUsage, weeklyUsage, monthlyUsage
+	type usageEntry struct {
+		label  string
+		pct    float64
+		resetS int
+	}
+	reUsage := regexp.MustCompile(`(rollingUsage|weeklyUsage|monthlyUsage).*?resetInSec:(\d+).*?usagePercent:(\d+(?:\.\d+)?)`)
+	matches := reUsage.FindAllStringSubmatch(text, -1)
+
+	if len(matches) == 0 {
+		return nil
+	}
+
+	var metrics []Metric
+	var nearestReset int64
+
+	nameMap := map[string]string{"rollingUsage": "5h rolling", "weeklyUsage": "Weekly", "monthlyUsage": "Monthly"}
+	for _, m := range matches {
+		var resetS int
+		fmt.Sscanf(m[2], "%d", &resetS)
+		var pct float64
+		fmt.Sscanf(m[3], "%f", &pct)
+
+		metrics = append(metrics, Metric{Label: nameMap[m[1]], Pct: pct})
+
+		if nearestReset == 0 || int64(resetS) < nearestReset {
+			nearestReset = int64(resetS)
+		}
+	}
+
 	var resetStr string
-	// Use next Sunday 00:00 as the reset reference
-	daysUntilSunday := (7 - int(now.Weekday())) % 7
-	if daysUntilSunday == 0 && now.Hour() >= 0 {
-		daysUntilSunday = 7 // if already Sunday, next Sunday
+	if nearestReset > 0 {
+		resetStr = formatResetTime(time.Now().Unix() + nearestReset)
 	}
-	nextSunday := time.Date(now.Year(), now.Month(), now.Day()+daysUntilSunday, 0, 0, 0, 0, now.Location())
-	resetStr = formatResetTime(nextSunday.Unix())
 
 	return &ProviderUsage{
 		Name:    "OpenCode",

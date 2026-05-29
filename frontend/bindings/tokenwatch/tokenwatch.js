@@ -38,13 +38,15 @@ export function QuitApp() {
 /**
  * @param {string} zaiToken
  * @param {string} claudeSession
+ * @param {string} openCodeCookie
  * @returns {$CancellablePromise<void>}
  */
-export function SaveSettings(zaiToken, claudeSession) {
-    return $Call.ByID(1691659760, zaiToken, claudeSession);
+export function SaveSettings(zaiToken, claudeSession, openCodeCookie) {
+    return $Call.ByID(1691659760, zaiToken, claudeSession, openCodeCookie);
 }
 
 /**
+ * StartPolling is kept for compatibility but does nothing
  * @returns {$CancellablePromise<void>}
  */
 export function StartPolling() {

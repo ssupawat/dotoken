@@ -101,7 +101,7 @@
   }
 
   /* ── Body ── */
-  .body { padding: 12px 0 4px; }
+  .body { padding: 12px 0 4px; max-height: 280px; overflow-y: auto; }
 
   /* ── Section ── */
   .section { padding: 4px 0 10px; }
@@ -345,6 +345,10 @@
     <div class="form-group">
       <label class="form-label" for="claude-session">Claude Tmux Session</label>
       <input type="text" class="form-input" id="claude-session" placeholder="e.g. tw-claude">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="opencode-cookie">OpenCode Auth Cookie</label>
+      <input type="password" class="form-input" id="opencode-cookie" placeholder="Paste auth cookie from opencode.ai">
     </div>
     <button class="btn-save" onclick="saveSettings()">Save Settings</button>
   </div>

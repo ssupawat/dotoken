@@ -65,6 +65,13 @@ export class AppConfig {
              */
             this["claudeSession"] = "";
         }
+        if (!("openCodeCookie" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["openCodeCookie"] = "";
+        }
 
         Object.assign(this, $$source);
     }

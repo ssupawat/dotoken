@@ -1,4 +1,4 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp, StartPolling } from '../bindings/tokenwatch/tokenwatch.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp } from '../bindings/tokenwatch/tokenwatch.js'
 import { Events } from '@wailsio/runtime'
 
 function pctLevel(pct) {
@@ -96,20 +96,22 @@ function render(data) {
 }
 
 async function refresh() {
+  // Render cached data immediately
+  if (cachedData) render(cachedData);
   document.getElementById('updated-text').textContent = 'refreshing...';
-  try {
-    const data = await FetchUsage();
+  // Fetch in background — updates via event when done
+  FetchUsage().then(data => {
+    cachedData = data;
     render(data);
-  } catch (err) {
-    document.getElementById('body').innerHTML = `
-      <div class="loading">Error: ${err}</div>`;
-    document.getElementById('updated-text').textContent = 'error';
-  }
+  }).catch(err => {
+    document.getElementById('body').innerHTML = `<div class="loading">Error: ${err}</div>`;
+  });
 }
 
 // ── Settings ──
 
 let isSettingsOpen = false;
+let cachedData = null;
 
 async function toggleSettings() {
   const body = document.getElementById('body');
@@ -128,6 +130,7 @@ async function toggleSettings() {
       const cfg = await GetSettings();
       document.getElementById('zai-token').value = cfg.zaiToken || '';
       document.getElementById('claude-session').value = cfg.claudeSession || '';
+      document.getElementById('opencode-cookie').value = cfg.openCodeCookie || '';
     } catch (err) {
       console.error(err);
     }
@@ -135,15 +138,16 @@ async function toggleSettings() {
     body.style.display = 'block';
     settingsView.style.display = 'none';
     settingsBtn.textContent = 'settings';
-    refresh();
+    if (cachedData) render(cachedData);
   }
 }
 
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
   const session = document.getElementById('claude-session').value.trim();
+  const cookie = document.getElementById('opencode-cookie').value.trim();
   try {
-    await SaveSettings(token, session);
+    await SaveSettings(token, session, cookie);
     toggleSettings(); // go back
   } catch (err) {
     alert(err); // This will show the Go validation error (e.g. "tmux session 'xyz' not found")
@@ -154,14 +158,6 @@ window.toggleSettings = toggleSettings;
 window.saveSettings = saveSettings;
 window.quit = quit;
 
-// ── Auto Refresh (every 5 minutes) ──
-
-setInterval(() => {
-  if (!isSettingsOpen) {
-    refresh();
-  }
-}, 300000);
-
 function quit() {
   QuitApp();
 }
@@ -169,12 +165,25 @@ function quit() {
 // Listen for real-time usage updates from Go backend
 Events.On("usage", (event) => {
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+  cachedData = data;
   render(data);
 });
 
-// Initial load
-refresh();
+// Refresh on first open (debounced)
+let lastRefresh = 0;
+function refreshOnOpen() {
+  const now = Date.now();
+  if (now - lastRefresh < 10000) return; // no more than once per 10s
+  lastRefresh = now;
+  refresh();
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !isSettingsOpen) refreshOnOpen();
+});
+window.addEventListener('focus', () => {
+  if (!isSettingsOpen) refreshOnOpen();
+});
 
-// Start background polling (5 min intervals)
-StartPolling();
+// Initial load (returns cache, refresh in background)
+refresh();
 
