@@ -108,6 +108,9 @@ func refreshUsage() {
 		providers = append(providers, *claude)
 		hasClaude = true
 	}
+	if oc := fetchOpenCodeUsage(); oc != nil {
+		providers = append(providers, *oc)
+	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
 	}
@@ -182,6 +185,8 @@ func fetchClaudeUsage() *ProviderUsage {
 	if strings.Contains(string(out), "How is Claude") {
 		exec.Command("tmux", "send-keys", "-t", sessionName, "0").Run()
 		time.Sleep(500 * time.Millisecond)
+		exec.Command("tmux", "send-keys", "-t", sessionName, "Escape").Run()
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// 2. Clear visible screen AND scrollback history
@@ -316,6 +321,75 @@ func parseClaudeUsageOutput(output string) *ProviderUsage {
 
 	return &ProviderUsage{
 		Name:    "Claude",
+		Metrics: metrics,
+		ResetIn: resetStr,
+	}
+}
+
+// ── OpenCode Go (local SQLite) ────────────────────────────
+
+// OpenCode Go limits (dollar-based)
+const (
+	ocRollingLimit = 12.0 // 5-hour rolling window
+	ocWeeklyLimit  = 30.0 // per week
+	ocMonthlyLimit = 60.0 // per month
+)
+
+func fetchOpenCodeUsage() *ProviderUsage {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil // no OpenCode DB, skip silently
+	}
+
+	now := time.Now()
+	fiveHrAgoMs := now.Add(-5 * time.Hour).UnixMilli()
+	weekStartMs := time.Date(now.Year(), now.Month(), now.Day()-int(now.Weekday()), 0, 0, 0, 0, now.Location()).UnixMilli()
+	monthStartMs := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).UnixMilli()
+
+	// Query rolling + weekly + monthly costs in one pass
+	query := fmt.Sprintf(`
+		SELECT
+			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END),
+			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END),
+			SUM(CASE WHEN json_extract(data, '$.time.completed') > %d THEN json_extract(data, '$.cost') ELSE 0 END)
+		FROM message
+		WHERE json_extract(data, '$.providerID') = 'opencode-go'
+		  AND json_extract(data, '$.cost') IS NOT NULL
+		  AND json_extract(data, '$.role') = 'assistant'
+	`, fiveHrAgoMs, weekStartMs, monthStartMs)
+
+	out, err := exec.Command("sqlite3", "-separator", " ", dbPath, query).Output()
+	if err != nil {
+		log.Printf("opencode: sqlite query failed: %v", err)
+		return nil
+	}
+
+	var rollingCost, weeklyCost, monthlyCost float64
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%f %f %f", &rollingCost, &weeklyCost, &monthlyCost)
+
+	metrics := []Metric{
+		{Label: "5h rolling", Pct: rollingCost / ocRollingLimit * 100},
+		{Label: "Weekly", Pct: weeklyCost / ocWeeklyLimit * 100},
+		{Label: "Monthly", Pct: monthlyCost / ocMonthlyLimit * 100},
+	}
+
+	// Reset time: find nearest reset
+	// Rolling resets ~5h from first message; weekly resets next Sunday; monthly resets 1st
+	var resetStr string
+	// Use next Sunday 00:00 as the reset reference
+	daysUntilSunday := (7 - int(now.Weekday())) % 7
+	if daysUntilSunday == 0 && now.Hour() >= 0 {
+		daysUntilSunday = 7 // if already Sunday, next Sunday
+	}
+	nextSunday := time.Date(now.Year(), now.Month(), now.Day()+daysUntilSunday, 0, 0, 0, 0, now.Location())
+	resetStr = formatResetTime(nextSunday.Unix())
+
+	return &ProviderUsage{
+		Name:    "OpenCode",
 		Metrics: metrics,
 		ResetIn: resetStr,
 	}
