@@ -1,4 +1,4 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp } from '../bindings/dotoken/dotoken.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder } from '../bindings/dotoken/dotoken.js'
 import { Events } from '@wailsio/runtime'
 
 function pctLevel(pct) {
@@ -56,8 +56,11 @@ function renderMetric(m, providerClass) {
 
 function renderProvider(p) {
   const cls = providerClass(p.name);
-  let html = `<div class="section">`;
+  let html = `<div class="section" draggable="true" data-provider="${p.name}">`;
+  html += `<div class="section-header">`;
+  html += `<span class="drag-handle" draggable="true">⋮⋮</span>`;
   html += `<div class="section-label">${p.name}</div>`;
+  html += `</div>`;
 
   for (const m of p.metrics) {
     html += renderMetric(m, cls);
@@ -74,6 +77,58 @@ function renderProvider(p) {
   html += `</div>`;
   return html;
 }
+
+// ── Drag and drop reorder ──
+
+let dragSrc = null;
+
+function handleDragStart(e) {
+  dragSrc = this;
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', '');
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const target = this.closest('.section');
+  if (target && target !== dragSrc) {
+    target.classList.add('drag-over');
+  }
+}
+
+function handleDragEnd(e) {
+  this.classList.remove('dragging');
+  document.querySelectorAll('#body .section').forEach(s => s.classList.remove('drag-over'));
+  dragSrc = null;
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const target = this.closest('.section');
+  document.querySelectorAll('#body .section').forEach(s => s.classList.remove('drag-over'));
+  if (!target || target === dragSrc) return;
+
+  const body = document.getElementById('body');
+  const sections = [...body.querySelectorAll('.section')];
+  const srcIdx = sections.indexOf(dragSrc);
+  const tgtIdx = sections.indexOf(target);
+  if (srcIdx === -1 || tgtIdx === -1) return;
+
+  if (srcIdx < tgtIdx) {
+    body.insertBefore(dragSrc, target.nextSibling);
+  } else {
+    body.insertBefore(dragSrc, target);
+  }
+
+  // Save new order
+  const order = [...body.querySelectorAll('.section')].map(s => s.dataset.provider);
+  SaveProviderOrder(order).catch(console.error);
+}
+
+// ── Render ──
 
 function render(data) {
   document.getElementById('updated-text').textContent = data.updatedAt;
@@ -93,6 +148,15 @@ function render(data) {
   });
 
   document.getElementById('body').innerHTML = html;
+
+  // Drag and drop reorder
+  const sections = document.querySelectorAll('#body .section');
+  sections.forEach(section => {
+    section.addEventListener('dragstart', handleDragStart);
+    section.addEventListener('dragover', handleDragOver);
+    section.addEventListener('drop', handleDrop);
+    section.addEventListener('dragend', handleDragEnd);
+  });
 }
 
 async function refresh() {

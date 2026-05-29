@@ -72,6 +72,13 @@ export class AppConfig {
              */
             this["openCodeCookie"] = "";
         }
+        if (!("providerOrder" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["providerOrder"] = [];
+        }
 
         Object.assign(this, $$source);
     }
@@ -82,7 +89,11 @@ export class AppConfig {
      * @returns {AppConfig}
      */
     static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("providerOrder" in $$parsedSource) {
+            $$parsedSource["providerOrder"] = $$createField3_0($$parsedSource["providerOrder"]);
+        }
         return new AppConfig(/** @type {Partial<AppConfig>} */($$parsedSource));
     }
 }
@@ -180,7 +191,7 @@ export class ProviderUsage {
      * @returns {ProviderUsage}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType3;
+        const $$createField1_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("metrics" in $$parsedSource) {
             $$parsedSource["metrics"] = $$createField1_0($$parsedSource["metrics"]);
@@ -192,5 +203,6 @@ export class ProviderUsage {
 // Private type creation functions
 const $$createType0 = ProviderUsage.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = Metric.createFrom;
-const $$createType3 = $Create.Array($$createType2);
+const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = Metric.createFrom;
+const $$createType4 = $Create.Array($$createType3);

@@ -53,9 +53,10 @@ func init() {
 type DoToken struct{}
 
 type AppConfig struct {
-	ZaiToken        string `json:"zaiToken"`
-	ClaudeSession   string `json:"claudeSession"`
-	OpenCodeCookie  string `json:"openCodeCookie"`
+	ZaiToken        string   `json:"zaiToken"`
+	ClaudeSession   string   `json:"claudeSession"`
+	OpenCodeCookie  string   `json:"openCodeCookie"`
+	ProviderOrder   []string `json:"providerOrder"`
 }
 
 func getConfigPath() string {
@@ -100,6 +101,42 @@ func (t *DoToken) QuitApp() {
 	os.Exit(0)
 }
 
+func (t *DoToken) SaveProviderOrder(order []string) error {
+	cfg := t.GetSettings()
+	cfg.ProviderOrder = order
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(getConfigPath(), data, 0644)
+}
+
+func applyOrder(providers []ProviderUsage, order []string) []ProviderUsage {
+	if len(order) == 0 {
+		return providers
+	}
+	rank := map[string]int{}
+	for i, name := range order {
+		rank[name] = i
+	}
+	reordered := make([]ProviderUsage, len(providers))
+	copy(reordered, providers)
+	for i := 0; i < len(reordered); i++ {
+		for j := i + 1; j < len(reordered); j++ {
+			ri := rank[reordered[i].Name]
+			rj := rank[reordered[j].Name]
+			// Unknown providers go to the end
+			if _, ok := rank[reordered[j].Name]; !ok {
+				continue
+			}
+			if _, ok := rank[reordered[i].Name]; !ok || ri > rj {
+				reordered[i], reordered[j] = reordered[j], reordered[i]
+			}
+		}
+	}
+	return reordered
+}
+
 var cachedUsage AllUsage
 var appWindow *application.WebviewWindow
 
@@ -137,6 +174,7 @@ func refreshUsage() {
 	}
 
 	if len(providers) > 0 {
+		providers = applyOrder(providers, cfg.ProviderOrder)
 		cachedUsage = AllUsage{
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
@@ -158,14 +196,16 @@ func refreshUsage() {
 			if p.Name == "Claude" {
 				cachedUsage.Providers[i] = *claude
 				cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
+				cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
 				if appWindow != nil {
 					appWindow.EmitEvent("usage", cachedUsage)
-			}
+				}
 				return
 			}
 		}
 		// Claude wasn't in cache yet, prepend it
 		cachedUsage.Providers = append([]ProviderUsage{*claude}, cachedUsage.Providers...)
+		cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
 		cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
 		if appWindow != nil {
 			appWindow.EmitEvent("usage", cachedUsage)

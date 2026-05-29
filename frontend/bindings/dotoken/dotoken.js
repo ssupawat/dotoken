@@ -36,6 +36,14 @@ export function QuitApp() {
 }
 
 /**
+ * @param {string[]} order
+ * @returns {$CancellablePromise<void>}
+ */
+export function SaveProviderOrder(order) {
+    return $Call.ByID(162760970, order);
+}
+
+/**
  * @param {string} zaiToken
  * @param {string} claudeSession
  * @param {string} openCodeCookie

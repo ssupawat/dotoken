@@ -104,10 +104,27 @@
   .body { padding: 12px 0 4px; max-height: 280px; overflow-y: auto; }
 
   /* ── Section ── */
-  .section { padding: 4px 0 10px; }
+  .section { padding: 4px 0 10px; cursor: grab; }
+
+  .section.dragging { opacity: 0.4; cursor: grabbing; }
+  .section.drag-over { outline: 1px dashed var(--dim); border-radius: 6px; }
+
+  .section-header { display: flex; align-items: center; padding: 0 18px 8px; }
+
+  .drag-handle {
+    cursor: grab;
+    color: var(--dim);
+    font-size: 14px;
+    line-height: 1;
+    margin-right: 8px;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .section:hover .drag-handle { opacity: 0.6; }
+  .section .drag-handle:active { cursor: grabbing; }
 
   .section-label {
-    padding: 0 18px 8px;
     font-family: 'DM Mono', monospace;
     font-size: 9px;
     font-weight: 500;
