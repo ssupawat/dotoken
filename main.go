@@ -68,14 +68,6 @@ func getConfigPath() string {
 }
 
 func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) error {
-	// Verify tmux session exists if provided
-	if claudeSession != "" {
-		cmd := exec.Command("tmux", "has-session", "-t", claudeSession)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("tmux session '%s' not found. Please run: tmux new -s %s", claudeSession, claudeSession)
-		}
-	}
-
 	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession, OpenCodeCookie: openCodeCookie}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
