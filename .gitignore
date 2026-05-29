@@ -1,8 +1,13 @@
 .task
 bin
+build/android/
+build/ios/
+build/linux/
+build/windows/
+build/docker/
+build/screenshot.png
+build/appicon.icon/
 frontend/dist
 frontend/node_modules
-build/linux/appimage/build
-build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 .pi/
 DoToken.app/
