@@ -29,16 +29,44 @@ jobs:
       - name: Build
         run: wails3 build
 
-      - name: Package
+      - name: Package .app bundle
         run: |
-          cd bin
-          zip dotoken-darwin.zip dotoken
+          VERSION=$(cat VERSION)
+          mkdir -p DoToken.app/Contents/MacOS
+          cp bin/dotoken DoToken.app/Contents/MacOS/dotoken
+          mkdir -p DoToken.app/Contents/Resources
+          cp build/appicon.png DoToken.app/Contents/Resources/appicon.png
+          cat > DoToken.app/Contents/Info.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>dotoken</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.dotoken.app</string>
+            <key>CFBundleName</key>
+            <string>DoToken</string>
+            <key>CFBundleDisplayName</key>
+            <string>DoToken</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>CFBundleIconFile</key>
+            <string>appicon</string>
+          </dict>
+          </plist>
+          PLIST
+          zip -r dotoken-darwin.zip DoToken.app
           shasum -a 256 dotoken-darwin.zip > dotoken-darwin.sha256
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bin/dotoken-darwin.zip
-            bin/dotoken-darwin.sha256
+            dotoken-darwin.zip
+            dotoken-darwin.sha256
           generate_release_notes: true

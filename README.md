@@ -14,9 +14,9 @@ A lightweight macOS menu bar app to monitor AI usage limits in real-time.
 curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | bash
 ```
 
-> On first run, macOS may show "cannot be opened because it is from an unidentified developer." Right-click the binary → Open → click Open to bypass Gatekeeper.
+> On first run, macOS may show "cannot be opened because it is from an unidentified developer." Right-click DoToken.app → Open → click Open to bypass Gatekeeper.
 
-> For auto-start on login, add `dotoken` to **System Settings → General → Login Items**.
+> For auto-start on login, add DoToken to **System Settings → General → Login Items**.
 
 ## Settings
 
