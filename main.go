@@ -67,17 +67,24 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) error {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) (string, error) {
+	var warning string
+	if claudeSession != "" {
+		if err := exec.Command("tmux", "has-session", "-t", claudeSession).Run(); err != nil {
+			warning = fmt.Sprintf("tmux session '%s' not found. Run: tmux new-session -d -s %s \"claude\"", claudeSession, claudeSession)
+		}
+	}
+
 	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession, OpenCodeCookie: openCodeCookie}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return warning, err
 	}
 	err = os.WriteFile(getConfigPath(), data, 0644)
 	if err == nil {
 		go refreshUsage()
 	}
-	return err
+	return warning, err
 }
 
 func (t *DoToken) GetSettings() AppConfig {
@@ -151,20 +158,23 @@ func refreshUsage() {
 		json.Unmarshal(data, &cfg)
 	}
 	if cfg.ClaudeSession != "" {
-		hasClaudeCache := false
-		for _, p := range cachedUsage.Providers {
-			if p.Name == "Claude" {
-				providers = append([]ProviderUsage{p}, providers...)
-				hasClaudeCache = true
-				break
+		sessionAlive := exec.Command("tmux", "has-session", "-t", cfg.ClaudeSession).Run() == nil
+		if sessionAlive {
+			hasClaudeCache := false
+			for _, p := range cachedUsage.Providers {
+				if p.Name == "Claude" {
+					providers = append([]ProviderUsage{p}, providers...)
+					hasClaudeCache = true
+					break
+				}
 			}
-		}
-		if !hasClaudeCache {
-			providers = append([]ProviderUsage{{
-				Name:    "Claude",
-				Metrics: []Metric{{Label: "Session", Pct: -1}},
-				ResetIn: "loading…",
-			}}, providers...)
+			if !hasClaudeCache {
+				providers = append([]ProviderUsage{{
+					Name:    "Claude",
+					Metrics: []Metric{{Label: "Session", Pct: -1}},
+					ResetIn: "loading…",
+				}}, providers...)
+			}
 		}
 	}
 
@@ -226,14 +236,7 @@ func fetchClaudeUsage() *ProviderUsage {
 
 	// Verify the session is alive
 	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil {
-		return &ProviderUsage{
-			Name: "Claude",
-			Metrics: []Metric{{
-				Label: "Status",
-				Pct:   0,
-			}},
-			ResetIn: "session dead/inactive",
-		}
+		return nil
 	}
 
 	// 1. Dismiss satisfaction survey if present

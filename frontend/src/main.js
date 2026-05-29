@@ -211,16 +211,51 @@ async function saveSettings() {
   const session = document.getElementById('claude-session').value.trim();
   const cookie = document.getElementById('opencode-cookie').value.trim();
   try {
-    await SaveSettings(token, session, cookie);
-    toggleSettings(); // go back
+    const result = await SaveSettings(token, session, cookie);
+    // result is the warning string from Go (string, error)
+    const warning = result || '';
+    if (warning) {
+      showWarning(warning);
+    } else {
+      hideWarning();
+    }
+    toggleSettings();
   } catch (err) {
-    alert(err); // This will show the Go validation error (e.g. "tmux session 'xyz' not found")
+    showWarning(err);
   }
 }
 
 window.toggleSettings = toggleSettings;
 window.saveSettings = saveSettings;
 window.quit = quit;
+
+function showWarning(msg) {
+  let banner = document.getElementById('warning-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'warning-banner';
+    document.querySelector('.popover').insertBefore(banner, document.querySelector('.header').nextSibling);
+  }
+  // Extract the command after "Run: "
+  const cmdMatch = msg.match(/Run: (.+)/);
+  const cmd = cmdMatch ? cmdMatch[1] : '';
+  const displayMsg = cmdMatch ? msg.replace(/Run: .+/, '') : msg;
+  banner.innerHTML = `<span>${displayMsg}</span>${cmd ? `<button class="copy-btn" onclick="copyCmd(this, '${cmd.replace(/'/g, "\\'")}')">copy</button>` : ''}`;
+  banner.style.display = 'flex';
+  banner.style.alignItems = 'center';
+  banner.style.gap = '8px';
+}
+
+function hideWarning() {
+  const banner = document.getElementById('warning-banner');
+  if (banner) banner.style.display = 'none';
+}
+
+function copyCmd(btn, cmd) {
+  navigator.clipboard.writeText(cmd);
+  btn.textContent = 'copied';
+  setTimeout(() => btn.textContent = 'copy', 1500);
+}
 
 function quit() {
   QuitApp();

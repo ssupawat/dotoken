@@ -19,6 +19,7 @@
     --openai:    #10a37f;
     --opencode:  #f59e0b;
     --zai:       #6c8eff;
+    --warn:      #f87171;
     --glow-c:    #d9775730;
     --glow-o:    #10a37f28;
     --glow-oc:   #f59e0b30;
@@ -54,6 +55,30 @@
     justify-content: space-between;
     border-bottom: 1px solid var(--border);
     -webkit-app-region: drag;
+  }
+
+  #warning-banner {
+    display: none;
+    padding: 8px 18px;
+    color: var(--warn);
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  .copy-btn {
+    background: none;
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .copy-btn:hover {
+    background: rgba(248, 113, 113, 0.1);
   }
 
   .header-left {
@@ -265,6 +290,8 @@
     display: none;
     text-align: left;
     padding: 20px 18px;
+    max-height: 280px;
+    overflow-y: auto;
   }
 
   .settings-title {
