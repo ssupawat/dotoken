@@ -1,12 +1,6 @@
 .task
 bin
-build/android/
-build/ios/
-build/linux/
-build/windows/
-build/docker/
-build/screenshot.png
-build/appicon.icon/
+build/
 frontend/dist
 frontend/node_modules
 .pi/
