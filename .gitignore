@@ -1,6 +1,9 @@
 .task
 bin
 build/
+!build/Taskfile.yml
+!build/config.yml
+!build/darwin/**
 frontend/dist
 frontend/node_modules
 .pi/
