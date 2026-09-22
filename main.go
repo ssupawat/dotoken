@@ -655,10 +655,6 @@ func main() {
 	tray.SetIcon(iconData)
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
-	tray.OnClick(func() {
-		log.Println("TRAY CLICK fired")
-		tray.ToggleWindow()
-	})
 
 	menu := app.NewMenu()
 	menu.Add("Quit").OnClick(func(ctx *application.Context) {
