@@ -1,5 +1,10 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder } from '../bindings/dotoken/dotoken.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder, ResizePopup } from '../bindings/dotoken/dotoken.js'
 import { Events } from '@wailsio/runtime'
+
+function fitWindow() {
+  const h = document.querySelector('.popover').offsetHeight;
+  ResizePopup(h);
+}
 
 function pctLevel(pct) {
   if (pct >= 90) return 'crit';
@@ -148,6 +153,7 @@ function render(data) {
   });
 
   document.getElementById('body').innerHTML = html;
+  fitWindow();
 
   // Drag and drop reorder
   const sections = document.querySelectorAll('#body .section');
@@ -188,7 +194,6 @@ async function toggleSettings() {
     body.style.display = 'none';
     settingsView.style.display = 'block';
     settingsBtn.textContent = 'back';
-
     // Populate current settings
     try {
       const cfg = await GetSettings();
@@ -204,6 +209,7 @@ async function toggleSettings() {
     settingsBtn.textContent = 'settings';
     if (cachedData) render(cachedData);
   }
+  requestAnimationFrame(fitWindow);
 }
 
 async function saveSettings() {
@@ -244,6 +250,7 @@ function showWarning(msg) {
   banner.style.display = 'flex';
   banner.style.alignItems = 'center';
   banner.style.gap = '8px';
+  fitWindow();
 }
 
 function hideWarning() {
@@ -266,6 +273,7 @@ Events.On("usage", (event) => {
   const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   cachedData = data;
   render(data);
+  fitWindow();
 });
 
 // Refresh on first open (debounced)

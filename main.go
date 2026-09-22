@@ -236,6 +236,20 @@ func (t *DoToken) FetchUsage() AllUsage {
 // StartPolling is kept for compatibility but does nothing
 func (t *DoToken) StartPolling() {}
 
+func (t *DoToken) ResizePopup(height float64) {
+	if appWindow == nil {
+		return
+	}
+	h := int(height)
+	if h < 120 {
+		h = 120
+	}
+	if h > 600 {
+		h = 600
+	}
+	appWindow.SetSize(300, h)
+}
+
 // ── Claude (tmux /usage) ──────────────────────────────────
 
 func claudeRunningInSession(sessionName string) bool {
@@ -623,9 +637,10 @@ func main() {
 		Frameless: true,
 		Mac: application.MacWindow{
 			TitleBar: application.MacTitleBarHidden,
-			Backdrop: application.MacBackdropTransparent,
+			Backdrop: application.MacBackdropNormal,
 		},
-		BackgroundColour: application.NewRGB(0, 0, 0),
+		BackgroundType:   application.BackgroundTypeSolid,
+		BackgroundColour: application.NewRGBA(14, 15, 17, 255), // match --bg #0e0f11
 		Hidden:           true,
 		AlwaysOnTop:      true,
 		URL:              "/",
@@ -637,9 +652,13 @@ func main() {
 	// System tray
 	tray := app.SystemTray.New()
 
-	tray.SetTemplateIcon(iconData)
+	tray.SetIcon(iconData)
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
+	tray.OnClick(func() {
+		log.Println("TRAY CLICK fired")
+		tray.ToggleWindow()
+	})
 
 	menu := app.NewMenu()
 	menu.Add("Quit").OnClick(func(ctx *application.Context) {

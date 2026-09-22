@@ -36,6 +36,14 @@ export function QuitApp() {
 }
 
 /**
+ * @param {number} height
+ * @returns {$CancellablePromise<void>}
+ */
+export function ResizePopup(height) {
+    return $Call.ByID(2580162796, height);
+}
+
+/**
  * @param {string[]} order
  * @returns {$CancellablePromise<void>}
  */
