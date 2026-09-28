@@ -397,6 +397,23 @@ func fetchClaudeUsage() *ProviderUsage {
 
 // ── OpenCode Go (web scraping) ──────────────────────────
 
+func opencodeExpired(cookie string) *ProviderUsage {
+	if !strings.Contains(cookie, "__Host-console_session") {
+		return &ProviderUsage{
+			Name:    "OpenCode",
+			Expired: true,
+			Metrics: []Metric{},
+			ResetIn: "cookie incomplete — copy the full Cookie header (must include __Host-console_session)",
+		}
+	}
+	return &ProviderUsage{
+		Name:    "OpenCode",
+		Expired: true,
+		Metrics: []Metric{},
+		ResetIn: "session expired — paste fresh Cookie header from opencode.ai console",
+	}
+}
+
 func fetchOpenCodeUsage() *ProviderUsage {
 	cookie := os.Getenv("OPENCODE_AUTH_COOKIE")
 	if cookie == "" {
@@ -407,49 +424,36 @@ func fetchOpenCodeUsage() *ProviderUsage {
 	}
 	// Users paste the full Cookie header from opencode.ai — it must include
 	// both auth= and __Host-console_session= (auth alone is rejected with 401)
-	const orgID = "wrk_01KSQKC93GMP038V8J9RBEFM8D"
-	req, err := http.NewRequest("GET", "https://opencode.ai/console/api/go/status", nil)
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// Resolve the org (workspace) that holds the Go subscription
+	req, err := http.NewRequest("GET", "https://opencode.ai/console/api/orgs", nil)
 	if err != nil {
 		return nil
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("x-org-id", orgID)
 	req.Header.Set("Accept", "*/*")
-
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("opencode: request failed: %v", err)
 		return nil
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return opencodeExpired(cookie)
+	}
+	var orgs []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &orgs); err != nil || len(orgs) == 0 {
+		log.Printf("opencode: no orgs found (status %d)", resp.StatusCode)
 		return nil
 	}
 
-	if resp.StatusCode == 401 || strings.Contains(string(body), "_tag\":\"Unauthorized") {
-		if !strings.Contains(cookie, "__Host-console_session") {
-			return &ProviderUsage{
-				Name:    "OpenCode",
-				Expired: true,
-				Metrics: []Metric{},
-				ResetIn: "cookie incomplete — copy the full Cookie header (must include __Host-console_session)",
-			}
-		}
-		return &ProviderUsage{
-			Name:    "OpenCode",
-			Expired: true,
-			Metrics: []Metric{},
-			ResetIn: "session expired — paste fresh Cookie header from opencode.ai console",
-		}
-	}
-	if resp.StatusCode != 200 {
-		log.Printf("opencode: status %d", resp.StatusCode)
-		return nil
-	}
-
-	var status struct {
+	// Query go/status per org; first org with a Go plan wins
+	var status *struct {
 		Access struct {
 			Meters map[string]struct {
 				LimitMicroCents string `json:"limitMicroCents"`
@@ -458,8 +462,51 @@ func fetchOpenCodeUsage() *ProviderUsage {
 			} `json:"meters"`
 		} `json:"access"`
 	}
-	if err := json.Unmarshal(body, &status); err != nil {
-		log.Printf("opencode: parse failed: %v", err)
+	unauthorized := false
+	for _, org := range orgs {
+		req, err := http.NewRequest("GET", "https://opencode.ai/console/api/go/status", nil)
+		if err != nil {
+			return nil
+		}
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("x-org-id", org.ID)
+		req.Header.Set("Accept", "*/*")
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("opencode: request failed: %v", err)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 401 || strings.Contains(string(body), "_tag\":\"Unauthorized") {
+			unauthorized = true
+			continue
+		}
+		if resp.StatusCode != 200 {
+			continue
+		}
+		var s struct {
+			Access struct {
+				Meters map[string]struct {
+					LimitMicroCents string `json:"limitMicroCents"`
+					UsedMicroCents  string `json:"usedMicroCents"`
+					ResetsAt        string `json:"resetsAt"`
+				} `json:"meters"`
+			} `json:"access"`
+		}
+		if err := json.Unmarshal(body, &s); err != nil {
+			continue
+		}
+		status = &s
+		break
+	}
+
+	if status == nil {
+		if unauthorized {
+			return opencodeExpired(cookie)
+		}
+		log.Printf("opencode: no Go subscription found in any org")
 		return nil
 	}
 
