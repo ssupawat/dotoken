@@ -4,7 +4,7 @@ A lightweight macOS menu bar app to monitor AI usage limits in real-time.
 
 ## Providers
 
-- **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain — no tmux session, no interference with your CLI sessions.
+- **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain and stays out of your CLI sessions.
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
 - **Z.ai** — queries & token limits via API
 
