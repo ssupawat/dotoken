@@ -1,6 +1,6 @@
 # DoToken 👀
 
-A lightweight macOS menu bar app to monitor AI usage limits in real-time.
+A simple macOS menu bar app to monitor AI usage limits in real-time.
 
 ## Providers
 
