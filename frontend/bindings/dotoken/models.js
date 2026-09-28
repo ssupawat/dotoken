@@ -181,6 +181,13 @@ export class ProviderUsage {
              */
             this["resetEpoch"] = 0;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["expired"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

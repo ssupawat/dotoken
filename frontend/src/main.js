@@ -138,6 +138,13 @@ function handleDrop(e) {
 function render(data) {
   document.getElementById('updated-text').textContent = data.updatedAt;
 
+  const expired = (data.providers || []).find(p => p.expired);
+  if (expired) {
+    showWarning(`${expired.name}: ${expired.resetIn}`);
+  } else {
+    hideWarning();
+  }
+
   if (!data.providers || data.providers.length === 0) {
     document.getElementById('body').innerHTML = `
       <div class="loading">Loading usage data…<br><span style="font-size:10px;color:var(--dim)">first fetch may take a moment</span></div>`;
@@ -198,7 +205,6 @@ async function toggleSettings() {
     try {
       const cfg = await GetSettings();
       document.getElementById('zai-token').value = cfg.zaiToken || '';
-      document.getElementById('claude-session').value = cfg.claudeSession || '';
       document.getElementById('opencode-cookie').value = cfg.openCodeCookie || '';
     } catch (err) {
       console.error(err);
@@ -214,10 +220,9 @@ async function toggleSettings() {
 
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
-  const session = document.getElementById('claude-session').value.trim();
   const cookie = document.getElementById('opencode-cookie').value.trim();
   try {
-    const result = await SaveSettings(token, session, cookie);
+    const result = await SaveSettings(token, '', cookie);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {
