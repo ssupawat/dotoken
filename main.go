@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -150,7 +152,7 @@ func refreshUsage() {
 	if data, err := os.ReadFile(getConfigPath()); err == nil {
 		json.Unmarshal(data, &cfg)
 	}
-	if readClaudeOauth() != nil {
+	if creds, _ := readClaudeOauth(); creds != nil {
 		hasClaudeCache := false
 		for _, p := range cachedUsage.Providers {
 			if p.Name == "Claude" {
@@ -240,14 +242,16 @@ type claudeOauthCreds struct {
 	ExpiresAt    int64  `json:"expiresAt"`
 }
 
-func readClaudeOauth() *claudeOauthCreds {
+func readClaudeOauth() (*claudeOauthCreds, func(*claudeOauthCreds) error) {
 	// macOS Keychain — Claude Code's default store
 	if out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output(); err == nil {
 		var parsed struct {
 			ClaudeAiOauth claudeOauthCreds `json:"claudeAiOauth"`
 		}
 		if json.Unmarshal(out, &parsed) == nil && parsed.ClaudeAiOauth.AccessToken != "" {
-			return &parsed.ClaudeAiOauth
+			raw := out
+			persist := func(n *claudeOauthCreds) error { return writeClaudeKeychain(raw, n) }
+			return &parsed.ClaudeAiOauth, persist
 		}
 	}
 
@@ -265,10 +269,60 @@ func readClaudeOauth() *claudeOauthCreds {
 			ClaudeAiOauth claudeOauthCreds `json:"claudeAiOauth"`
 		}
 		if json.Unmarshal(data, &parsed) == nil && parsed.ClaudeAiOauth.AccessToken != "" {
-			return &parsed.ClaudeAiOauth
+			path := p
+			persist := func(n *claudeOauthCreds) error { return writeClaudeFile(path, data, n) }
+			return &parsed.ClaudeAiOauth, persist
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// writeClaudeKeychain rewrites the Keychain item with refreshed OAuth fields,
+// preserving every other top-level key Claude Code keeps there.
+func writeClaudeKeychain(raw []byte, n *claudeOauthCreds) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return err
+	}
+	updated, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	top["claudeAiOauth"] = updated
+	full, err := json.Marshal(top)
+	if err != nil {
+		return err
+	}
+
+	meta, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials").CombinedOutput()
+	if err != nil {
+		return err
+	}
+	reAcct := regexp.MustCompile(`"acct"<blob>="([^"]+)"`)
+	m := reAcct.FindSubmatch(meta)
+	if m == nil {
+		return fmt.Errorf("keychain account not found")
+	}
+	cmd := exec.Command("security", "add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", string(m[1]), "-w", string(full))
+	return cmd.Run()
+}
+
+// writeClaudeFile rewrites the credentials file with refreshed OAuth fields.
+func writeClaudeFile(path string, raw []byte, n *claudeOauthCreds) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return err
+	}
+	updated, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	top["claudeAiOauth"] = updated
+	full, err := json.Marshal(top)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, full, 0600)
 }
 
 func refreshClaudeToken(refreshToken string) *claudeOauthCreds {
@@ -288,15 +342,20 @@ func refreshClaudeToken(refreshToken string) *claudeOauthCreds {
 		return nil
 	}
 	var tok struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int64  `json:"expires_in"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if json.NewDecoder(resp.Body).Decode(&tok) != nil || tok.AccessToken == "" {
 		return nil
 	}
+	rt := tok.RefreshToken
+	if rt == "" {
+		rt = refreshToken
+	}
 	return &claudeOauthCreds{
 		AccessToken:  tok.AccessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: rt,
 		ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).UnixMilli(),
 	}
 }
@@ -311,7 +370,9 @@ func claudeExpired(msg string) *ProviderUsage {
 }
 
 func fetchClaudeUsage() *ProviderUsage {
-	creds := readClaudeOauth()
+	var creds *claudeOauthCreds
+	var persist func(*claudeOauthCreds) error
+	creds, persist = readClaudeOauth()
 	if creds == nil {
 		return claudeExpired("Claude Code not signed in — run: claude /login")
 	}
@@ -334,6 +395,12 @@ func fetchClaudeUsage() *ProviderUsage {
 	if status == 401 && creds.RefreshToken != "" {
 		if fresh := refreshClaudeToken(creds.RefreshToken); fresh != nil {
 			creds = fresh
+			// Write the rotated tokens back so Claude Code keeps a valid pair
+			if persist != nil {
+				if err := persist(fresh); err != nil {
+					log.Printf("claude: persisting refreshed token failed: %v", err)
+				}
+			}
 			body, status = callUsage(creds.AccessToken)
 		}
 	}
