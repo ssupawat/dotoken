@@ -2,6 +2,10 @@
 
 A simple macOS menu bar app to monitor AI usage limits in real-time.
 
+## Menu bar
+
+The menu bar shows your highest usage percentage across all providers (e.g. `72%`), so you can see how close you are to a limit without opening the popup. Hover the icon for a per-provider breakdown. A trailing `!` means a provider needs you to sign in again. Usage refreshes in the background every 5 minutes.
+
 ## Providers
 
 - **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain.
@@ -31,6 +35,7 @@ Config file: `~/.dotoken.json`
 |-------|-------------|
 | `zaiToken` | Z.ai API bearer token |
 | `openCodeCookie` | full `Cookie` header from opencode.ai console |
+| `hideTrayPercent` | `true` to show only the icon in the menu bar |
 
 Settings can also be edited from the app's settings panel (tray menu → settings).
 

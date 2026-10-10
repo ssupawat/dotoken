@@ -79,6 +79,13 @@ export class AppConfig {
              */
             this["providerOrder"] = [];
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["hideTrayPercent"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

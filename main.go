@@ -14,9 +14,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -62,6 +64,7 @@ type AppConfig struct {
 	ClaudeSession   string   `json:"claudeSession"`
 	OpenCodeCookie  string   `json:"openCodeCookie"`
 	ProviderOrder   []string `json:"providerOrder"`
+	HideTrayPercent bool     `json:"hideTrayPercent,omitempty"`
 }
 
 func getConfigPath() string {
@@ -69,8 +72,13 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) (string, error) {
-	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession, OpenCodeCookie: openCodeCookie}
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, hideTrayPercent bool) (string, error) {
+	// Keep fields not edited in the settings panel (e.g. provider order)
+	cfg := t.GetSettings()
+	cfg.ZaiToken = zaiToken
+	cfg.ClaudeSession = claudeSession
+	cfg.OpenCodeCookie = openCodeCookie
+	cfg.HideTrayPercent = hideTrayPercent
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", err
@@ -136,6 +144,94 @@ func applyOrder(providers []ProviderUsage, order []string) []ProviderUsage {
 
 var cachedUsage AllUsage
 var appWindow *application.WebviewWindow
+var tray *application.SystemTray
+
+// How often usage is refreshed in the background so the menu bar stays current
+const pollInterval = 5 * time.Minute
+
+// emitUsage pushes the current snapshot to the popup and the menu bar
+func emitUsage() {
+	if appWindow != nil {
+		appWindow.EmitEvent("usage", cachedUsage)
+	}
+	updateTray(cachedUsage.Providers)
+}
+
+// trayLabel returns the highest usage percentage across all providers,
+// so the closest limit is visible without opening the popup.
+func trayLabel(providers []ProviderUsage) string {
+	peak := -1.0
+	expired := false
+	for _, p := range providers {
+		if p.Expired {
+			expired = true
+			continue
+		}
+		for _, m := range p.Metrics {
+			if m.Pct > peak {
+				peak = m.Pct
+			}
+		}
+	}
+	label := ""
+	if peak >= 0 {
+		label = fmt.Sprintf("%d%%", int(peak+0.5))
+	}
+	if expired {
+		label += "!"
+	}
+	return label
+}
+
+// trayTooltip lists every metric, one provider per line
+func trayTooltip(providers []ProviderUsage) string {
+	var lines []string
+	for _, p := range providers {
+		if p.Expired {
+			lines = append(lines, p.Name+": sign-in needed")
+			continue
+		}
+		var parts []string
+		for _, m := range p.Metrics {
+			if m.Pct < 0 {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s %d%%", m.Label, int(m.Pct+0.5)))
+		}
+		if len(parts) > 0 {
+			lines = append(lines, p.Name+": "+strings.Join(parts, " · "))
+		}
+	}
+	if len(lines) == 0 {
+		return "DoToken"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func updateTray(providers []ProviderUsage) {
+	if tray == nil {
+		return
+	}
+	if (&DoToken{}).GetSettings().HideTrayPercent {
+		tray.SetLabel("")
+	} else {
+		tray.SetLabel(trayLabel(providers))
+	}
+	tray.SetTooltip(trayTooltip(providers))
+}
+
+var pollOnce sync.Once
+
+func startPolling() {
+	pollOnce.Do(func() {
+		go func() {
+			refreshUsage()
+			for range time.Tick(pollInterval) {
+				refreshUsage()
+			}
+		}()
+	})
+}
 
 func refreshUsage() {
 	// Fetch fast providers first, emit immediately
@@ -176,9 +272,7 @@ func refreshUsage() {
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
 		}
-		if appWindow != nil {
-			appWindow.EmitEvent("usage", cachedUsage)
-		}
+		emitUsage()
 	}
 
 	// Fetch Claude in background, emit again when done
@@ -194,9 +288,7 @@ func refreshUsage() {
 				cachedUsage.Providers[i] = *claude
 				cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
 				cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
-				if appWindow != nil {
-					appWindow.EmitEvent("usage", cachedUsage)
-				}
+				emitUsage()
 				return
 			}
 		}
@@ -204,9 +296,7 @@ func refreshUsage() {
 		cachedUsage.Providers = append([]ProviderUsage{*claude}, cachedUsage.Providers...)
 		cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
 		cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
-		if appWindow != nil {
-			appWindow.EmitEvent("usage", cachedUsage)
-		}
+		emitUsage()
 	}()
 }
 
@@ -751,9 +841,10 @@ func main() {
 	})
 
 	// System tray
-	tray := app.SystemTray.New()
+	tray = app.SystemTray.New()
 
 	tray.SetIcon(iconData)
+	tray.SetTooltip("DoToken")
 
 	tray.AttachWindow(appWindow).WindowOffset(5)
 
@@ -762,6 +853,11 @@ func main() {
 		app.Quit()
 	})
 	tray.SetMenu(menu)
+
+	// Keep the menu bar label fresh even when the popup is never opened
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		startPolling()
+	})
 
 	err := app.Run()
 	if err != nil {
