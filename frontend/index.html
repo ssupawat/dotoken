@@ -332,6 +332,18 @@
     border-color: #6c8eff;
   }
 
+  .form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+  .form-check input { accent-color: #6c8eff; cursor: pointer; }
+
   .btn-save {
     background: linear-gradient(135deg, #d97757, #6c8eff);
     border: none;
@@ -389,6 +401,12 @@
     <div class="form-group">
       <label class="form-label" for="opencode-cookie">OpenCode Cookie Header</label>
       <input type="password" class="form-input" id="opencode-cookie" placeholder="Paste full Cookie header from opencode.ai console">
+    </div>
+    <div class="form-group">
+      <label class="form-check" for="show-tray-label">
+        <input type="checkbox" id="show-tray-label" checked>
+        <span>Show highest usage % in menu bar</span>
+      </label>
     </div>
     <button class="btn-save" onclick="saveSettings()">Save Settings</button>
   </div>

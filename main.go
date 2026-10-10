@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,9 +15,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -58,10 +62,11 @@ func init() {
 type DoToken struct{}
 
 type AppConfig struct {
-	ZaiToken        string   `json:"zaiToken"`
-	ClaudeSession   string   `json:"claudeSession"`
-	OpenCodeCookie  string   `json:"openCodeCookie"`
-	ProviderOrder   []string `json:"providerOrder"`
+	ZaiToken       string   `json:"zaiToken"`
+	ClaudeSession  string   `json:"claudeSession"`
+	OpenCodeCookie string   `json:"openCodeCookie"`
+	ProviderOrder  []string `json:"providerOrder"`
+	HideTrayLabel  bool     `json:"hideTrayLabel"`
 }
 
 func getConfigPath() string {
@@ -69,8 +74,13 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string) (string, error) {
-	cfg := AppConfig{ZaiToken: zaiToken, ClaudeSession: claudeSession, OpenCodeCookie: openCodeCookie}
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel bool) (string, error) {
+	// Start from the saved config so fields not on the form (provider order) survive
+	cfg := t.GetSettings()
+	cfg.ZaiToken = zaiToken
+	cfg.ClaudeSession = claudeSession
+	cfg.OpenCodeCookie = openCodeCookie
+	cfg.HideTrayLabel = !showTrayLabel
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", err
@@ -135,7 +145,66 @@ func applyOrder(providers []ProviderUsage, order []string) []ProviderUsage {
 }
 
 var cachedUsage AllUsage
+var usageMu sync.Mutex
+var claudeInFlight atomic.Bool
 var appWindow *application.WebviewWindow
+var tray *application.SystemTray
+
+// How often usage is refreshed in the background so the menu bar label stays current
+const pollInterval = 5 * time.Minute
+
+// publishUsage pushes cachedUsage to the popup and the menu bar label.
+// Callers must hold usageMu.
+func publishUsage() {
+	if appWindow != nil {
+		appWindow.EmitEvent("usage", cachedUsage)
+	}
+	if tray != nil {
+		label := ""
+		if !(&DoToken{}).GetSettings().HideTrayLabel {
+			label = trayLabel(cachedUsage.Providers)
+		}
+		tray.SetLabel(label)
+	}
+}
+
+// trayLabel summarizes usage for the menu bar: the highest percentage across
+// every provider's metrics, with "!" appended when a provider needs re-auth.
+func trayLabel(providers []ProviderUsage) string {
+	maxPct := -1.0
+	expired := false
+	for _, p := range providers {
+		if p.Expired {
+			expired = true
+			continue
+		}
+		for _, m := range p.Metrics {
+			if m.Pct > maxPct {
+				maxPct = m.Pct
+			}
+		}
+	}
+	if maxPct < 0 {
+		if expired {
+			return "!"
+		}
+		return ""
+	}
+	label := fmt.Sprintf("%d%%", int(math.Round(maxPct)))
+	if expired {
+		label += " !"
+	}
+	return label
+}
+
+func pollUsage() {
+	refreshUsage()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		refreshUsage()
+	}
+}
 
 func refreshUsage() {
 	// Fetch fast providers first, emit immediately
@@ -152,7 +221,9 @@ func refreshUsage() {
 	if data, err := os.ReadFile(getConfigPath()); err == nil {
 		json.Unmarshal(data, &cfg)
 	}
-	if creds, _ := readClaudeOauth(); creds != nil {
+	creds, _ := readClaudeOauth()
+	usageMu.Lock()
+	if creds != nil {
 		hasClaudeCache := false
 		for _, p := range cachedUsage.Providers {
 			if p.Name == "Claude" {
@@ -176,17 +247,24 @@ func refreshUsage() {
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
 		}
-		if appWindow != nil {
-			appWindow.EmitEvent("usage", cachedUsage)
-		}
+		publishUsage()
 	}
+	usageMu.Unlock()
 
-	// Fetch Claude in background, emit again when done
+	// Fetch Claude in background, emit again when done. Skip if a fetch is
+	// already running so two refreshes never rotate the same refresh token.
+	if !claudeInFlight.CompareAndSwap(false, true) {
+		return
+	}
 	go func() {
+		defer claudeInFlight.Store(false)
 		claude := fetchClaudeUsage()
 		if claude == nil {
 			return
 		}
+
+		usageMu.Lock()
+		defer usageMu.Unlock()
 
 		// Replace placeholder with real data
 		for i, p := range cachedUsage.Providers {
@@ -194,9 +272,7 @@ func refreshUsage() {
 				cachedUsage.Providers[i] = *claude
 				cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
 				cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
-				if appWindow != nil {
-					appWindow.EmitEvent("usage", cachedUsage)
-				}
+				publishUsage()
 				return
 			}
 		}
@@ -204,14 +280,14 @@ func refreshUsage() {
 		cachedUsage.Providers = append([]ProviderUsage{*claude}, cachedUsage.Providers...)
 		cachedUsage.Providers = applyOrder(cachedUsage.Providers, (&DoToken{}).GetSettings().ProviderOrder)
 		cachedUsage.UpdatedAt = time.Now().Format("15:04:05")
-		if appWindow != nil {
-			appWindow.EmitEvent("usage", cachedUsage)
-		}
+		publishUsage()
 	}()
 }
 
 func (t *DoToken) FetchUsage() AllUsage {
 	go refreshUsage()
+	usageMu.Lock()
+	defer usageMu.Unlock()
 	return cachedUsage
 }
 
@@ -614,6 +690,7 @@ func fetchOpenCodeUsage() *ProviderUsage {
 		ResetIn: resetStr,
 	}
 }
+
 // ── Z.ai (API) ──────────────────────────────────────────────
 
 type zaiLimit struct {
@@ -751,7 +828,7 @@ func main() {
 	})
 
 	// System tray
-	tray := app.SystemTray.New()
+	tray = app.SystemTray.New()
 
 	tray.SetIcon(iconData)
 
@@ -762,6 +839,12 @@ func main() {
 		app.Quit()
 	})
 	tray.SetMenu(menu)
+
+	// Keep usage fresh in the background so the menu bar label is current
+	// without opening the popup
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		go pollUsage()
+	})
 
 	err := app.Run()
 	if err != nil {
