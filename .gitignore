@@ -8,4 +8,5 @@ frontend/dist
 frontend/node_modules
 .pi/
 DoToken.app/
-appicon.png
+/appicon.png
+build/darwin/icons.icns

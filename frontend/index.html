@@ -128,6 +128,18 @@
   /* ── Body ── */
   .body { padding: 12px 0 4px; max-height: 280px; overflow-y: auto; }
 
+  .body::-webkit-scrollbar,
+  .settings-view::-webkit-scrollbar { width: 8px; }
+  .body::-webkit-scrollbar-track,
+  .settings-view::-webkit-scrollbar-track { background: transparent; }
+  .body::-webkit-scrollbar-thumb,
+  .settings-view::-webkit-scrollbar-thumb {
+    background: var(--muted);
+    border-radius: 4px;
+  }
+  .body::-webkit-scrollbar-thumb:hover,
+  .settings-view::-webkit-scrollbar-thumb:hover { background: #ffffff44; }
+
   /* ── Section ── */
   .section { padding: 4px 0 10px; cursor: grab; }
 
