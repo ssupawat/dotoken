@@ -226,6 +226,7 @@ async function toggleSettings() {
       document.getElementById('zai-token').value = cfg.zaiToken || '';
       document.getElementById('opencode-cookie').value = cfg.openCodeCookie || '';
       document.getElementById('show-tray-label').checked = !cfg.hideTrayLabel;
+      document.getElementById('show-alerts').checked = !cfg.muteAlerts;
     } catch (err) {
       console.error(err);
     }
@@ -242,8 +243,9 @@ async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
   const cookie = document.getElementById('opencode-cookie').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
+  const showAlerts = document.getElementById('show-alerts').checked;
   try {
-    const result = await SaveSettings(token, '', cookie, showTrayLabel);
+    const result = await SaveSettings(token, '', cookie, showTrayLabel, showAlerts);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {
