@@ -86,6 +86,13 @@ export class AppConfig {
              */
             this["hideTrayLabel"] = false;
         }
+        if (!("muteAlerts" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["muteAlerts"] = false;
+        }
 
         Object.assign(this, $$source);
     }

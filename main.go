@@ -73,6 +73,7 @@ type AppConfig struct {
 	OpenCodeCookie string   `json:"openCodeCookie"`
 	ProviderOrder  []string `json:"providerOrder"`
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
+	MuteAlerts     bool     `json:"muteAlerts"`
 }
 
 func getConfigPath() string {
@@ -80,13 +81,14 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel, showAlerts bool) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
 	cfg.ClaudeSession = claudeSession
 	cfg.OpenCodeCookie = openCodeCookie
 	cfg.HideTrayLabel = !showTrayLabel
+	cfg.MuteAlerts = !showAlerts
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", err
@@ -159,19 +161,22 @@ var tray *application.SystemTray
 // How often usage is refreshed in the background so the menu bar label stays current
 const pollInterval = 5 * time.Minute
 
-// publishUsage pushes cachedUsage to the popup and the menu bar label.
+// publishUsage pushes cachedUsage to the popup and the menu bar label, and
+// sends any usage notifications it triggers.
 // Callers must hold usageMu.
 func publishUsage() {
 	if appWindow != nil {
 		appWindow.EmitEvent("usage", cachedUsage)
 	}
+	cfg := (&DoToken{}).GetSettings()
 	if tray != nil {
 		label := ""
-		if !(&DoToken{}).GetSettings().HideTrayLabel {
+		if !cfg.HideTrayLabel {
 			label = trayLabel(cachedUsage.Providers)
 		}
 		tray.SetLabel(label)
 	}
+	notifyUsage(cachedUsage.Providers, cfg.MuteAlerts)
 }
 
 // trayLabel summarizes usage for the menu bar: the highest percentage across

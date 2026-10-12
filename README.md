@@ -32,8 +32,11 @@ Config file: `~/.dotoken.json`
 | `zaiToken` | Z.ai API bearer token |
 | `openCodeCookie` | full `Cookie` header from opencode.ai console |
 | `hideTrayLabel` | `true` to hide the usage % next to the menu bar icon |
+| `muteAlerts` | `true` to turn off usage notifications |
 
 Usage refreshes in the background every 5 minutes. The menu bar shows the highest usage % across all providers (e.g. `73%`), so you can see how close you are to a limit without opening the popup; a `!` means a provider needs you to sign in again.
+
+DoToken sends a macOS notification when any limit crosses 80% or 95% (with when it resets, and when it runs out at the current rate), when a limit you were warned about resets, and when a provider needs you to sign in again. Each alert fires once per window, so a limit hovering around a threshold won't spam you.
 
 Settings can also be edited from the app's settings panel (tray menu → settings).
 
