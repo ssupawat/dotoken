@@ -79,6 +79,13 @@ export class AppConfig {
              */
             this["providerOrder"] = [];
         }
+        if (!("hideTrayLabel" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["hideTrayLabel"] = false;
+        }
 
         Object.assign(this, $$source);
     }
