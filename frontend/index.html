@@ -200,6 +200,20 @@
     position: relative;
   }
 
+  .bar { position: relative; }
+
+  /* Where usage would sit at an even pace through the window */
+  .pace-tick {
+    position: absolute;
+    top: 50%;
+    width: 1px;
+    height: 9px;
+    margin-left: -0.5px;
+    transform: translateY(-50%);
+    background: #ffffff66;
+    pointer-events: none;
+  }
+
   .bar-fill {
     height: 100%;
     border-radius: 99px;
@@ -264,6 +278,20 @@
     font-size: 9px;
     color: #ffffff33;
   }
+
+  /* ── Run-out forecast ── */
+  .forecast-row {
+    padding: 3px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: #f59e0b;
+  }
+
+  .forecast-time { font-weight: 500; white-space: nowrap; }
 
   /* ── Footer ── */
   .footer {

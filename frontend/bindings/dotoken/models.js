@@ -139,6 +139,42 @@ export class Metric {
              */
             this["pct"] = 0;
         }
+        if (!("resetEpoch" in $$source)) {
+            /**
+             * Filled by applyForecast; zero when the provider doesn't report them
+             * @member
+             * @type {number | undefined}
+             */
+            this["resetEpoch"] = undefined;
+        }
+        if (!("resetAt" in $$source)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resetAt"] = undefined;
+        }
+        if (!("pace" in $$source)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["pace"] = undefined;
+        }
+        if (!("runOutEpoch" in $$source)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["runOutEpoch"] = undefined;
+        }
+        if (!("runOut" in $$source)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["runOut"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
