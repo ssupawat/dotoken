@@ -42,12 +42,10 @@ function renderMetric(m, providerClass) {
   const cls = [providerClass, level].filter(Boolean).join(' ');
 
   if (m.pct > 0) {
-    // Tick marks where usage would be at an even pace through the window
-    const tick = m.pace > 0 ? `<div class="pace-tick" style="left:${Math.min(m.pace, 100)}%"></div>` : '';
     return `
-      <div class="row ${cls}" title="${metricTooltip(m)}">
+      <div class="row ${cls}">
         <span class="row-label">${m.label}</span>
-        <div class="bar"><div class="bar-track"><div class="bar-fill" style="width:${Math.min(m.pct, 100)}%"></div></div>${tick}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(m.pct, 100)}%"></div></div>
         <span class="row-pct">${Math.round(m.pct)}%</span>
       </div>`;
   }
@@ -61,13 +59,6 @@ function renderMetric(m, providerClass) {
     </div>`;
 }
 
-function metricTooltip(m) {
-  const parts = [];
-  if (m.resetAt) parts.push(`resets ${m.resetAt}`);
-  if (m.pace > 0) parts.push(`even pace ${Math.round(m.pace)}%`);
-  return parts.join(' · ');
-}
-
 function renderProvider(p) {
   const cls = providerClass(p.name);
   let html = `<div class="section" draggable="true" data-provider="${p.name}">`;
@@ -78,16 +69,6 @@ function renderProvider(p) {
 
   for (const m of p.metrics) {
     html += renderMetric(m, cls);
-  }
-
-  // Limits that will be hit before they reset at the current rate
-  for (const m of p.metrics) {
-    if (!m.runOut) continue;
-    html += `
-      <div class="forecast-row" title="resets ${m.resetAt}">
-        <span class="forecast-label">${m.label} runs out at this rate</span>
-        <span class="forecast-time">${m.runOut}</span>
-      </div>`;
   }
 
   if (p.resetIn) {

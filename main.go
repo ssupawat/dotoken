@@ -44,12 +44,6 @@ type Metric struct {
 	Used  float64 `json:"used"`
 	Max   float64 `json:"max"`
 	Pct   float64 `json:"pct"`
-	// Filled by applyForecast; zero when the provider doesn't report them
-	ResetEpoch  int64   `json:"resetEpoch,omitempty"`
-	ResetAt     string  `json:"resetAt,omitempty"`
-	Pace        float64 `json:"pace,omitempty"`
-	RunOutEpoch int64   `json:"runOutEpoch,omitempty"`
-	RunOut      string  `json:"runOut,omitempty"`
 	// WindowMinutes is the length of the limit's window; 0 when unknown
 	WindowMinutes int `json:"windowMinutes,omitempty"`
 }
@@ -682,11 +676,10 @@ func fetchClaudeUsage() *ProviderUsage {
 		"session":    "Session",
 		"weekly_all": "Weekly",
 	}
-	windows := map[string]time.Duration{
-		"session":    5 * time.Hour,
-		"weekly_all": 7 * 24 * time.Hour,
+	windows := map[string]int{
+		"session":    300,
+		"weekly_all": 7 * 24 * 60,
 	}
-	now := time.Now()
 	var metrics []Metric
 	var nearestReset int64
 	for _, l := range usage.Limits {
@@ -699,9 +692,8 @@ func fetchClaudeUsage() *ProviderUsage {
 			pct = l.Utilization
 		}
 		m := Metric{Label: label, Pct: pct}
-		m.WindowMinutes = int(windows[l.Kind].Minutes())
+		m.WindowMinutes = windows[l.Kind]
 		if t, err := time.Parse(time.RFC3339, l.ResetsAt); err == nil {
-			applyForecast(&m, t, windows[l.Kind], now)
 			epoch := t.Unix()
 			if nearestReset == 0 || epoch < nearestReset {
 				nearestReset = epoch
@@ -840,8 +832,7 @@ func fetchOpenCodeUsage() *ProviderUsage {
 	}
 
 	nameMap := map[string]string{"fiveHour": "5h rolling", "week": "Weekly", "month": "Monthly"}
-	windows := map[string]time.Duration{"fiveHour": 5 * time.Hour, "week": 7 * 24 * time.Hour}
-	now := time.Now()
+	windows := map[string]int{"fiveHour": 300, "week": 7 * 24 * 60, "month": 30 * 24 * 60}
 	var metrics []Metric
 	var nearestReset int64
 	for _, key := range []string{"fiveHour", "week", "month"} {
@@ -857,12 +848,7 @@ func fetchOpenCodeUsage() *ProviderUsage {
 		metric := Metric{Label: nameMap[key], Pct: used / limit * 100}
 		if m.ResetsAt != "" {
 			if t, err := time.Parse(time.RFC3339, m.ResetsAt); err == nil {
-				window := windows[key]
-				if key == "month" {
-					window = monthWindow(t)
-				}
-				metric.WindowMinutes = int(window.Minutes())
-				applyForecast(&metric, t, window, now)
+				metric.WindowMinutes = windows[key]
 				epoch := t.Unix()
 				if nearestReset == 0 || epoch < nearestReset {
 					nearestReset = epoch
@@ -954,13 +940,9 @@ func fetchZaiUsage() *ProviderUsage {
 			label = "Tokens"
 		}
 
-		// Z.ai doesn't document each limit's window length, so only the
-		// per-limit reset is shown — no pace or run-out forecast
-		m := Metric{Label: label, Pct: limit.Percentage}
-		if limit.NextResetTime > 0 {
-			applyForecast(&m, time.UnixMilli(limit.NextResetTime), 0, time.Now())
-		}
-		m.WindowMinutes = zaiWindowMinutes(limit)
+		// Z.ai doesn't document each limit's window length; the unit and number
+		// fields above are what we use for the menu bar window ranking
+		m := Metric{Label: label, Pct: limit.Percentage, WindowMinutes: zaiWindowMinutes(limit)}
 		metrics = append(metrics, m)
 
 		resetTime := time.UnixMilli(limit.NextResetTime).UTC()

@@ -149,42 +149,6 @@ export class Metric {
         }
         if (/** @type {any} */(false)) {
             /**
-             * Filled by applyForecast; zero when the provider doesn't report them
-             * @member
-             * @type {number | undefined}
-             */
-            this["resetEpoch"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["resetAt"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {number | undefined}
-             */
-            this["pace"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {number | undefined}
-             */
-            this["runOutEpoch"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["runOut"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
              * WindowMinutes is the length of the limit's window; 0 when unknown
              * @member
              * @type {number | undefined}
