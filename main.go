@@ -50,6 +50,8 @@ type Metric struct {
 	Pace        float64 `json:"pace,omitempty"`
 	RunOutEpoch int64   `json:"runOutEpoch,omitempty"`
 	RunOut      string  `json:"runOut,omitempty"`
+	// WindowMinutes is the length of the limit's window; 0 when unknown
+	WindowMinutes int `json:"windowMinutes,omitempty"`
 }
 
 type AllUsage struct {
@@ -73,6 +75,8 @@ type AppConfig struct {
 	OpenCodeCookie string   `json:"openCodeCookie"`
 	ProviderOrder  []string `json:"providerOrder"`
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
+	// StaticTrayLabel turns off the rotation, leaving one provider on screen
+	StaticTrayLabel bool `json:"staticTrayLabel,omitempty"`
 }
 
 func getConfigPath() string {
@@ -80,13 +84,14 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel, rotateTrayLabel bool) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
 	cfg.ClaudeSession = claudeSession
 	cfg.OpenCodeCookie = openCodeCookie
 	cfg.HideTrayLabel = !showTrayLabel
+	cfg.StaticTrayLabel = !rotateTrayLabel
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", err
@@ -159,6 +164,9 @@ var tray *application.SystemTray
 // How often usage is refreshed in the background so the menu bar label stays current
 const pollInterval = 5 * time.Minute
 
+// How long each provider's label stays in the menu bar before the next one
+const trayRotateInterval = 4 * time.Second
+
 // publishUsage pushes cachedUsage to the popup and the menu bar label.
 // Callers must hold usageMu.
 func publishUsage() {
@@ -166,41 +174,205 @@ func publishUsage() {
 		appWindow.EmitEvent("usage", cachedUsage)
 	}
 	if tray != nil {
+		cfg := (&DoToken{}).GetSettings()
 		label := ""
-		if !(&DoToken{}).GetSettings().HideTrayLabel {
+		switch {
+		case cfg.HideTrayLabel:
+		case cfg.StaticTrayLabel:
 			label = trayLabel(cachedUsage.Providers)
+		default:
+			// Rotating labels are advanced by rotateTrayLabel; start at the first
+			if labels := trayLabels(cachedUsage.Providers); len(labels) > 0 {
+				label = labels[0]
+			}
 		}
 		tray.SetLabel(label)
 	}
 }
 
-// trayLabel summarizes usage for the menu bar: the highest percentage across
-// every provider's metrics, with "!" appended when a provider needs re-auth.
-func trayLabel(providers []ProviderUsage) string {
-	maxPct := -1.0
-	expired := false
-	for _, p := range providers {
-		if p.Expired {
-			expired = true
+// ANSI colours for the menu bar label. Wails renders these through the
+// system status item, which keeps the text legible in light and dark menu bars.
+const (
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
+	ansiRed    = "\x1b[31m"
+	ansiReset  = "\x1b[0m"
+)
+
+// windowTier ranks a limit's window so the menu bar can report the shortest one
+// first: up to 5 hours, then up to a week, then month and beyond, then unknown.
+func windowTier(windowMinutes int) int {
+	switch {
+	case windowMinutes > 0 && windowMinutes <= 5*60:
+		return 0
+	case windowMinutes > 0 && windowMinutes <= 7*24*60:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// providerShort is the name shown in the menu bar, where space is tight.
+func providerShort(name string) string {
+	switch name {
+	case "Claude":
+		return "C"
+	case "OpenCode":
+		return "OC"
+	case "Z.ai":
+		return "Z"
+	default:
+		return name
+	}
+}
+
+func remainingColour(remaining int) string {
+	switch {
+	case remaining < 20:
+		return ansiRed
+	case remaining <= 50:
+		return ansiYellow
+	default:
+		return ansiGreen
+	}
+}
+
+// tightestUsed returns the most used limit in a provider, taking the shortest
+// window that has data, and reports its tier and whether there is anything to
+// show at all.
+func tightestUsed(p ProviderUsage) (float64, int, bool) {
+	best := [3]float64{-1, -1, -1}
+	for _, m := range p.Metrics {
+		if m.Pct < 0 {
 			continue
 		}
-		for _, m := range p.Metrics {
-			if m.Pct > maxPct {
-				maxPct = m.Pct
+		tier := windowTier(m.WindowMinutes)
+		if m.Pct > best[tier] {
+			best[tier] = m.Pct
+		}
+	}
+	for tier, used := range best {
+		if used >= 0 {
+			return used, tier, true
+		}
+	}
+	return 0, 0, false
+}
+
+// trayLabel is the single menu bar label: the tightest limit across every
+// provider, taking the shortest window that has data.
+func trayLabel(providers []ProviderUsage) string {
+	best := [3]struct {
+		used float64
+		name string
+	}{}
+	for i := range best {
+		best[i].used = -1
+	}
+	expired := ""
+	for _, p := range providers {
+		if p.Expired {
+			if expired == "" {
+				expired = p.Name
 			}
+			continue
+		}
+		used, tier, ok := tightestUsed(p)
+		if !ok {
+			continue
+		}
+		if used > best[tier].used {
+			best[tier] = struct {
+				used float64
+				name string
+			}{used, p.Name}
 		}
 	}
-	if maxPct < 0 {
-		if expired {
-			return "!"
+
+	for _, b := range best {
+		if b.used >= 0 {
+			remaining := int(math.Round(100 - b.used))
+			return remainingColour(remaining) + fmt.Sprintf("%s %d%%", providerShort(b.name), remaining) + ansiReset
 		}
-		return ""
 	}
-	label := fmt.Sprintf("%d%%", int(math.Round(maxPct)))
-	if expired {
-		label += " !"
+	if expired != "" {
+		return ansiRed + providerShort(expired) + " !" + ansiReset
 	}
-	return label
+	return ""
+}
+
+// trayLabels returns one entry per provider for the rotating menu bar label.
+// Provider names and percentages are padded into two columns so the menu bar
+// does not shift as the label changes.
+func trayLabels(providers []ProviderUsage) []string {
+	type entry struct {
+		provider  string
+		value     string
+		remaining int
+		plain     bool
+	}
+	var entries []entry
+	for _, p := range providers {
+		if p.Expired {
+			entries = append(entries, entry{provider: providerShort(p.Name), value: "!", plain: true})
+			continue
+		}
+		used, _, ok := tightestUsed(p)
+		if !ok {
+			continue
+		}
+		remaining := int(math.Round(100 - used))
+		entries = append(entries, entry{
+			provider:  providerShort(p.Name),
+			value:     fmt.Sprintf("%d%%", remaining),
+			remaining: remaining,
+		})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	providerWidth, valueWidth := 0, 0
+	for _, e := range entries {
+		if len(e.provider) > providerWidth {
+			providerWidth = len(e.provider)
+		}
+		if len(e.value) > valueWidth {
+			valueWidth = len(e.value)
+		}
+	}
+	labels := make([]string, 0, len(entries))
+	for _, e := range entries {
+		text := e.provider + strings.Repeat(" ", providerWidth-len(e.provider)) +
+			" " + strings.Repeat(" ", valueWidth-len(e.value)) + e.value
+		if e.plain {
+			labels = append(labels, ansiRed+text+ansiReset)
+			continue
+		}
+		labels = append(labels, remainingColour(e.remaining)+text+ansiReset)
+	}
+	return labels
+}
+
+// rotateTrayLabel cycles the menu bar label through the providers.
+func rotateTrayLabel() {
+	ticker := time.NewTicker(trayRotateInterval)
+	defer ticker.Stop()
+	i := 0
+	for range ticker.C {
+		cfg := (&DoToken{}).GetSettings()
+		if cfg.HideTrayLabel || cfg.StaticTrayLabel {
+			continue
+		}
+		usageMu.Lock()
+		labels := trayLabels(cachedUsage.Providers)
+		usageMu.Unlock()
+		if len(labels) == 0 {
+			continue
+		}
+		i++
+		tray.SetLabel(labels[i%len(labels)])
+	}
 }
 
 func pollUsage() {
@@ -527,6 +699,7 @@ func fetchClaudeUsage() *ProviderUsage {
 			pct = l.Utilization
 		}
 		m := Metric{Label: label, Pct: pct}
+		m.WindowMinutes = int(windows[l.Kind].Minutes())
 		if t, err := time.Parse(time.RFC3339, l.ResetsAt); err == nil {
 			applyForecast(&m, t, windows[l.Kind], now)
 			epoch := t.Unix()
@@ -688,6 +861,7 @@ func fetchOpenCodeUsage() *ProviderUsage {
 				if key == "month" {
 					window = monthWindow(t)
 				}
+				metric.WindowMinutes = int(window.Minutes())
 				applyForecast(&metric, t, window, now)
 				epoch := t.Unix()
 				if nearestReset == 0 || epoch < nearestReset {
@@ -716,6 +890,8 @@ func fetchOpenCodeUsage() *ProviderUsage {
 
 type zaiLimit struct {
 	Type          string  `json:"type"`
+	Unit          int     `json:"unit"`
+	Number        int     `json:"number"`
 	Percentage    float64 `json:"percentage"`
 	NextResetTime int64   `json:"nextResetTime"`
 }
@@ -724,6 +900,17 @@ type zaiResponse struct {
 	Data struct {
 		Limits []zaiLimit `json:"limits"`
 	} `json:"data"`
+}
+
+// zaiWindowMinutes maps a Z.ai limit's unit and number onto a window length.
+// The units are the codes the API returns: 3=hours, 4=days, 5=30 days, 6=weeks.
+func zaiWindowMinutes(limit zaiLimit) int {
+	units := map[int]int{3: 60, 4: 1440, 5: 43200, 6: 10080}
+	unit, ok := units[limit.Unit]
+	if !ok || limit.Number <= 0 {
+		return 0
+	}
+	return unit * limit.Number
 }
 
 func fetchZaiUsage() *ProviderUsage {
@@ -773,6 +960,7 @@ func fetchZaiUsage() *ProviderUsage {
 		if limit.NextResetTime > 0 {
 			applyForecast(&m, time.UnixMilli(limit.NextResetTime), 0, time.Now())
 		}
+		m.WindowMinutes = zaiWindowMinutes(limit)
 		metrics = append(metrics, m)
 
 		resetTime := time.UnixMilli(limit.NextResetTime).UTC()
@@ -871,6 +1059,7 @@ func main() {
 	// without opening the popup
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		go pollUsage()
+		go rotateTrayLabel()
 	})
 
 	err := app.Run()

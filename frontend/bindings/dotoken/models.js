@@ -86,6 +86,14 @@ export class AppConfig {
              */
             this["hideTrayLabel"] = false;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * StaticTrayLabel turns off the rotation, leaving one provider on screen
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["staticTrayLabel"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -139,7 +147,7 @@ export class Metric {
              */
             this["pct"] = 0;
         }
-        if (!("resetEpoch" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * Filled by applyForecast; zero when the provider doesn't report them
              * @member
@@ -147,33 +155,41 @@ export class Metric {
              */
             this["resetEpoch"] = undefined;
         }
-        if (!("resetAt" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {string | undefined}
              */
             this["resetAt"] = undefined;
         }
-        if (!("pace" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {number | undefined}
              */
             this["pace"] = undefined;
         }
-        if (!("runOutEpoch" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {number | undefined}
              */
             this["runOutEpoch"] = undefined;
         }
-        if (!("runOut" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {string | undefined}
              */
             this["runOut"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * WindowMinutes is the length of the limit's window; 0 when unknown
+             * @member
+             * @type {number | undefined}
+             */
+            this["windowMinutes"] = undefined;
         }
 
         Object.assign(this, $$source);
