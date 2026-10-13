@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+	"time"
+)
 
 func TestTrayLabel(t *testing.T) {
 	tests := []struct {
@@ -137,5 +141,68 @@ func TestZaiWindowMinutes(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("zaiWindowMinutes(unit=%d, number=%d) = %d, want %d", tt.unit, tt.number, got, tt.want)
 		}
+	}
+}
+
+func TestParseClaudeUsageResetsPerLimit(t *testing.T) {
+	session := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	weekly := time.Now().Add(72 * time.Hour).Truncate(time.Second)
+	body := fmt.Sprintf(`{"limits":[
+		{"kind":"session","percent":12,"resets_at":%q},
+		{"kind":"weekly_all","utilization":41,"resets_at":%q},
+		{"kind":"unknown","percent":99}
+	]}`, session.Format(time.RFC3339), weekly.Format(time.RFC3339))
+
+	p := parseClaudeUsage([]byte(body))
+	if p == nil || len(p.Metrics) != 2 {
+		t.Fatalf("parseClaudeUsage() = %+v, want 2 metrics", p)
+	}
+	if got, want := p.Metrics[0].ResetIn, formatResetTime(session.Unix()); got != want {
+		t.Errorf("session ResetIn = %q, want %q", got, want)
+	}
+	if got, want := p.Metrics[1].ResetIn, formatResetTime(weekly.Unix()); got != want {
+		t.Errorf("weekly ResetIn = %q, want %q", got, want)
+	}
+	if p.Metrics[0].ResetIn == p.Metrics[1].ResetIn {
+		t.Errorf("session and weekly should reset at different times, both %q", p.Metrics[0].ResetIn)
+	}
+	// The card's own reset stays the nearest one
+	if p.ResetIn != p.Metrics[0].ResetIn {
+		t.Errorf("provider ResetIn = %q, want nearest %q", p.ResetIn, p.Metrics[0].ResetIn)
+	}
+}
+
+func TestParseClaudeUsageWithoutResetTime(t *testing.T) {
+	p := parseClaudeUsage([]byte(`{"limits":[{"kind":"session","percent":12}]}`))
+	if p == nil || len(p.Metrics) != 1 {
+		t.Fatalf("parseClaudeUsage() = %+v, want 1 metric", p)
+	}
+	if p.Metrics[0].ResetIn != "" || p.ResetIn != "" {
+		t.Errorf("expected no reset time, got metric %q provider %q", p.Metrics[0].ResetIn, p.ResetIn)
+	}
+}
+
+func TestParseZaiLimitsResetsPerLimit(t *testing.T) {
+	soon := time.Now().Add(3 * time.Hour)
+	later := time.Now().Add(5 * 24 * time.Hour)
+	p := parseZaiLimits([]zaiLimit{
+		{Type: "TIME_LIMIT", Unit: 3, Number: 5, Percentage: 20, NextResetTime: soon.UnixMilli()},
+		{Type: "TOKENS_LIMIT", Unit: 6, Number: 1, Percentage: 60, NextResetTime: later.UnixMilli()},
+		{Type: "OTHER", Percentage: 5, NextResetTime: time.Now().Add(-time.Hour).UnixMilli()},
+	})
+	if p == nil || len(p.Metrics) != 3 {
+		t.Fatalf("parseZaiLimits() = %+v, want 3 metrics", p)
+	}
+	if got, want := p.Metrics[0].ResetIn, formatResetTime(soon.UnixMilli()/1000); got != want {
+		t.Errorf("Queries ResetIn = %q, want %q", got, want)
+	}
+	if got, want := p.Metrics[1].ResetIn, formatResetTime(later.UnixMilli()/1000); got != want {
+		t.Errorf("Tokens ResetIn = %q, want %q", got, want)
+	}
+	if p.Metrics[2].ResetIn != "" {
+		t.Errorf("a reset in the past should be left blank, got %q", p.Metrics[2].ResetIn)
+	}
+	if p.ResetEpoch != soon.UnixMilli()/1000 {
+		t.Errorf("provider ResetEpoch = %d, want nearest %d", p.ResetEpoch, soon.UnixMilli()/1000)
 	}
 }

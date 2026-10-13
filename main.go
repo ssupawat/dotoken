@@ -46,6 +46,8 @@ type Metric struct {
 	Pct   float64 `json:"pct"`
 	// WindowMinutes is the length of the limit's window; 0 when unknown
 	WindowMinutes int `json:"windowMinutes,omitempty"`
+	// ResetIn is when this limit resets (e.g. "3:04pm"); empty when unknown
+	ResetIn string `json:"resetIn,omitempty"`
 }
 
 type AllUsage struct {
@@ -684,6 +686,12 @@ func fetchClaudeUsage() *ProviderUsage {
 		return nil
 	}
 
+	return parseClaudeUsage(body)
+}
+
+// parseClaudeUsage turns the OAuth usage response into a provider card, with
+// each limit carrying its own reset time.
+func parseClaudeUsage(body []byte) *ProviderUsage {
 	var usage struct {
 		Limits []struct {
 			Kind        string  `json:"kind"`
@@ -719,6 +727,7 @@ func fetchClaudeUsage() *ProviderUsage {
 		m.WindowMinutes = windows[l.Kind]
 		if t, err := time.Parse(time.RFC3339, l.ResetsAt); err == nil {
 			epoch := t.Unix()
+			m.ResetIn = formatResetTime(epoch)
 			if nearestReset == 0 || epoch < nearestReset {
 				nearestReset = epoch
 			}
@@ -874,6 +883,7 @@ func fetchOpenCodeUsage() *ProviderUsage {
 			if t, err := time.Parse(time.RFC3339, m.ResetsAt); err == nil {
 				metric.WindowMinutes = windows[key]
 				epoch := t.Unix()
+				metric.ResetIn = formatResetTime(epoch)
 				if nearestReset == 0 || epoch < nearestReset {
 					nearestReset = epoch
 				}
@@ -952,11 +962,17 @@ func fetchZaiUsage() *ProviderUsage {
 		return nil
 	}
 
+	return parseZaiLimits(result.Data.Limits)
+}
+
+// parseZaiLimits turns Z.ai's quota limits into a provider card, with each
+// limit carrying its own reset time.
+func parseZaiLimits(limits []zaiLimit) *ProviderUsage {
 	var metrics []Metric
 	var resetEpoch int64
 	var nearestReset time.Duration
 
-	for _, limit := range result.Data.Limits {
+	for _, limit := range limits {
 		label := limit.Type
 		if limit.Type == "TIME_LIMIT" {
 			label = "Queries"
@@ -967,10 +983,13 @@ func fetchZaiUsage() *ProviderUsage {
 		// Z.ai doesn't document each limit's window length; the unit and number
 		// fields above are what we use for the menu bar window ranking
 		m := Metric{Label: label, Pct: limit.Percentage, WindowMinutes: zaiWindowMinutes(limit)}
-		metrics = append(metrics, m)
 
 		resetTime := time.UnixMilli(limit.NextResetTime).UTC()
 		until := time.Until(resetTime)
+		if until > 0 {
+			m.ResetIn = formatResetTime(limit.NextResetTime / 1000)
+		}
+		metrics = append(metrics, m)
 		if until > 0 && (nearestReset == 0 || until < nearestReset) {
 			nearestReset = until
 			resetEpoch = limit.NextResetTime / 1000
