@@ -152,6 +152,10 @@ func applyOrder(providers []ProviderUsage, order []string) []ProviderUsage {
 var cachedUsage AllUsage
 var usageMu sync.Mutex
 var claudeInFlight atomic.Bool
+
+// claudeRetryAt backs off while Anthropic's usage endpoint reports 429, so the
+// 5-minute poller does not hammer it and the card does not flicker away.
+var claudeRetryAt atomic.Int64
 var appWindow *application.WebviewWindow
 var tray *application.SystemTray
 
@@ -625,21 +629,41 @@ func fetchClaudeUsage() *ProviderUsage {
 		return claudeExpired("Claude Code not signed in — run: claude /login")
 	}
 
-	callUsage := func(token string) ([]byte, int) {
+	callUsage := func(token string) (retryAfter int64, body []byte, status int) {
 		req, _ := http.NewRequest("GET", "https://api.anthropic.com/api/oauth/usage", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("anthropic-version", "2023-06-01")
 		client := &http.Client{Timeout: 15 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, 0
+			return 0, nil, 0
 		}
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		return body, resp.StatusCode
+		body, _ = io.ReadAll(resp.Body)
+		if ra, err := strconv.ParseInt(strings.TrimSpace(resp.Header.Get("Retry-After")), 10, 64); err == nil && ra > 0 {
+			retryAfter = ra
+		}
+		return retryAfter, body, resp.StatusCode
 	}
 
-	body, status := callUsage(creds.AccessToken)
+	if retryUntil := claudeRetryAt.Load(); retryUntil > time.Now().UnixMilli() {
+		log.Printf("claude: usage skipped, backing off for %s", time.Until(time.UnixMilli(retryUntil)).Round(time.Second))
+		return nil
+	}
+
+	retryAfter, body, status := callUsage(creds.AccessToken)
+	if status == 429 {
+		wait := time.Duration(60) * time.Second
+		if retryAfter > 0 {
+			wait = time.Duration(retryAfter) * time.Second
+		}
+		if wait < 15*time.Second {
+			wait = 15 * time.Second
+		}
+		claudeRetryAt.Store(time.Now().Add(wait).UnixMilli())
+		log.Printf("claude: rate limited, backing off for %s", wait)
+		return nil
+	}
 	if status == 401 && creds.RefreshToken != "" {
 		if fresh := refreshClaudeToken(creds.RefreshToken); fresh != nil {
 			creds = fresh
@@ -649,7 +673,7 @@ func fetchClaudeUsage() *ProviderUsage {
 					log.Printf("claude: persisting refreshed token failed: %v", err)
 				}
 			}
-			body, status = callUsage(creds.AccessToken)
+			_, body, status = callUsage(creds.AccessToken)
 		}
 	}
 	if status == 401 {
