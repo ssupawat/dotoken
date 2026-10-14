@@ -22,7 +22,7 @@ function providerClass(name) {
   const n = name.toLowerCase();
   if (n.includes('claude')) return 'claude';
   if (n.includes('opencode')) return 'opencode';
-  if (n.includes('openai')) return 'openai';
+  if (n.includes('openai') || n.includes('codex')) return 'openai';
   if (n.includes('z.ai')) return 'zai';
   return '';
 }
