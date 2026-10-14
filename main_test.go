@@ -139,3 +139,72 @@ func TestZaiWindowMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCodexUsage(t *testing.T) {
+	body := []byte(`{
+		"plan_type": "plus",
+		"rate_limit": {
+			"allowed": true,
+			"limit_reached": false,
+			"primary_window": {"used_percent": 42, "limit_window_seconds": 18000, "reset_after_seconds": 600, "reset_at": 2000000600},
+			"secondary_window": {"used_percent": 17, "limit_window_seconds": 604800, "reset_after_seconds": 90000, "reset_at": 2000090000}
+		}
+	}`)
+	got := parseCodexUsage(body)
+	if got == nil {
+		t.Fatal("parseCodexUsage() = nil")
+	}
+	if got.Name != "Codex" {
+		t.Errorf("Name = %q, want Codex", got.Name)
+	}
+	want := []Metric{
+		{Label: "Session", Pct: 42, WindowMinutes: 300},
+		{Label: "Weekly", Pct: 17, WindowMinutes: 7 * 24 * 60},
+	}
+	if len(got.Metrics) != len(want) {
+		t.Fatalf("got %d metrics, want %d: %+v", len(got.Metrics), len(want), got.Metrics)
+	}
+	for i := range want {
+		if got.Metrics[i] != want[i] {
+			t.Errorf("Metrics[%d] = %+v, want %+v", i, got.Metrics[i], want[i])
+		}
+	}
+	if got.ResetIn != formatResetTime(2000000600) {
+		t.Errorf("ResetIn = %q, want the primary window's reset", got.ResetIn)
+	}
+}
+
+func TestParseCodexUsageWithoutRateLimit(t *testing.T) {
+	for _, body := range []string{`{"plan_type": "free"}`, `{"rate_limit": {}}`, `not json`} {
+		if got := parseCodexUsage([]byte(body)); got != nil {
+			t.Errorf("parseCodexUsage(%s) = %+v, want nil", body, got)
+		}
+	}
+}
+
+func TestCodexWindowLabel(t *testing.T) {
+	tests := map[int]string{
+		300:          "Session",
+		7 * 24 * 60:  "Weekly",
+		30 * 24 * 60: "30d",
+		60:           "1h",
+		45:           "45m",
+		0:            "Usage",
+	}
+	for minutes, want := range tests {
+		if got := codexWindowLabel(minutes); got != want {
+			t.Errorf("codexWindowLabel(%d) = %q, want %q", minutes, got, want)
+		}
+	}
+}
+
+func TestTrayLabelsIncludesCodex(t *testing.T) {
+	providers := []ProviderUsage{
+		{Name: "Claude", Metrics: []Metric{{Pct: 10, WindowMinutes: 300}}},
+		{Name: "Codex", Metrics: []Metric{{Pct: 42, WindowMinutes: 300}}},
+	}
+	labels := trayLabels(providers)
+	if len(labels) != 2 || labels[1] != ansiGreen+"CX 58%"+ansiReset {
+		t.Errorf("trayLabels() = %q, want Codex shown as CX 58%%", labels)
+	}
+}

@@ -5,6 +5,7 @@ A simple macOS menu bar app to monitor AI usage limits in real-time.
 ## Providers
 
 - **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain.
+- **Codex** — 5-hour session & weekly limits via ChatGPT's usage API. Reads the login the Codex CLI stores (`~/.codex/auth.json` or the macOS Keychain).
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
 - **Z.ai** — queries & token limits via API
 
@@ -21,6 +22,7 @@ curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | ba
 ## Requirements
 
 - **Claude**: [Claude Code](https://code.claude.com/) installed and signed in (`claude /login`). The app reads the OAuth token from your Keychain and refreshes it when needed.
+- **Codex**: [Codex CLI](https://github.com/openai/codex) signed in with ChatGPT (`codex login`). Nothing to configure — the card appears when a login is found. DoToken never refreshes the token itself; if it expires, running `codex` renews it.
 - **OpenCode**: a paid Go plan. Paste the full `Cookie` request header from opencode.ai (must include both `auth=` and `__Host-console_session=`).
 
 ## Settings

@@ -219,6 +219,8 @@ func providerShort(name string) string {
 		return "OC"
 	case "Z.ai":
 		return "Z"
+	case "Codex":
+		return "CX"
 	default:
 		return name
 	}
@@ -390,6 +392,9 @@ func refreshUsage() {
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
+	}
+	if codex := fetchCodexUsage(); codex != nil {
+		providers = append(providers, *codex)
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
@@ -894,6 +899,145 @@ func fetchOpenCodeUsage() *ProviderUsage {
 		Metrics: metrics,
 		ResetIn: resetStr,
 	}
+}
+
+// ── Codex (ChatGPT usage API) ───────────────────────────
+
+// codexAuth is the part of the Codex CLI's auth.json we need.
+type codexAuth struct {
+	Tokens *struct {
+		AccessToken string `json:"access_token"`
+		AccountID   string `json:"account_id"`
+	} `json:"tokens"`
+}
+
+type codexWindow struct {
+	UsedPercent        float64 `json:"used_percent"`
+	LimitWindowSeconds int     `json:"limit_window_seconds"`
+	ResetAt            int64   `json:"reset_at"`
+}
+
+type codexUsageResponse struct {
+	RateLimit *struct {
+		PrimaryWindow   *codexWindow `json:"primary_window"`
+		SecondaryWindow *codexWindow `json:"secondary_window"`
+	} `json:"rate_limit"`
+}
+
+// readCodexAuth returns the ChatGPT login the Codex CLI stores, from the
+// macOS Keychain when the CLI keeps it there, otherwise from auth.json.
+// API-key logins have no tokens and are treated as not signed in.
+func readCodexAuth() *codexAuth {
+	var sources [][]byte
+	if out, err := exec.Command("security", "find-generic-password", "-s", "Codex Auth", "-w").Output(); err == nil {
+		sources = append(sources, out)
+	}
+	home := os.Getenv("CODEX_HOME")
+	if home == "" {
+		userHome, _ := os.UserHomeDir()
+		home = filepath.Join(userHome, ".codex")
+	}
+	if data, err := os.ReadFile(filepath.Join(home, "auth.json")); err == nil {
+		sources = append(sources, data)
+	}
+	for _, data := range sources {
+		var auth codexAuth
+		if json.Unmarshal(data, &auth) == nil && auth.Tokens != nil && auth.Tokens.AccessToken != "" {
+			return &auth
+		}
+	}
+	return nil
+}
+
+// codexWindowLabel names a Codex limit after its window length.
+func codexWindowLabel(windowMinutes int) string {
+	switch {
+	case windowMinutes == 300:
+		return "Session"
+	case windowMinutes == 7*24*60:
+		return "Weekly"
+	case windowMinutes > 0 && windowMinutes%(24*60) == 0:
+		return fmt.Sprintf("%dd", windowMinutes/(24*60))
+	case windowMinutes > 0 && windowMinutes%60 == 0:
+		return fmt.Sprintf("%dh", windowMinutes/60)
+	case windowMinutes > 0:
+		return fmt.Sprintf("%dm", windowMinutes)
+	default:
+		return "Usage"
+	}
+}
+
+// parseCodexUsage turns a /wham/usage response into a provider card.
+func parseCodexUsage(body []byte) *ProviderUsage {
+	var usage codexUsageResponse
+	if err := json.Unmarshal(body, &usage); err != nil || usage.RateLimit == nil {
+		return nil
+	}
+	var metrics []Metric
+	var nearestReset int64
+	for _, w := range []*codexWindow{usage.RateLimit.PrimaryWindow, usage.RateLimit.SecondaryWindow} {
+		if w == nil {
+			continue
+		}
+		windowMinutes := w.LimitWindowSeconds / 60
+		metrics = append(metrics, Metric{
+			Label:         codexWindowLabel(windowMinutes),
+			Pct:           w.UsedPercent,
+			WindowMinutes: windowMinutes,
+		})
+		if w.ResetAt > 0 && (nearestReset == 0 || w.ResetAt < nearestReset) {
+			nearestReset = w.ResetAt
+		}
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+	return &ProviderUsage{
+		Name:    "Codex",
+		Metrics: metrics,
+		ResetIn: formatResetTime(nearestReset),
+	}
+}
+
+func fetchCodexUsage() *ProviderUsage {
+	auth := readCodexAuth()
+	if auth == nil {
+		return nil
+	}
+
+	req, err := http.NewRequest("GET", "https://chatgpt.com/backend-api/wham/usage", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.Tokens.AccessToken)
+	if auth.Tokens.AccountID != "" {
+		req.Header.Set("ChatGPT-Account-Id", auth.Tokens.AccountID)
+	}
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("codex: request failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// The Codex CLI owns the refresh token; refreshing here would rotate it out
+	// from under the CLI, so an expired token is left for the CLI to renew.
+	if resp.StatusCode == 401 {
+		return &ProviderUsage{
+			Name:    "Codex",
+			Expired: true,
+			Metrics: []Metric{},
+			ResetIn: "Codex sign-in expired — run codex, or: codex login",
+		}
+	}
+	if resp.StatusCode != 200 {
+		log.Printf("codex: usage request failed: %d", resp.StatusCode)
+		return nil
+	}
+	return parseCodexUsage(body)
 }
 
 // ── Z.ai (API) ──────────────────────────────────────────────
