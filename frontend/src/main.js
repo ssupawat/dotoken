@@ -1,4 +1,4 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder, ResizePopup } from '../bindings/dotoken/dotoken.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder, ResizePopup, GetLaunchAtLogin, SetLaunchAtLogin } from '../bindings/dotoken/dotoken.js'
 import { Events } from '@wailsio/runtime'
 
 function fitWindow() {
@@ -189,6 +189,8 @@ async function refresh() {
 
 let isSettingsOpen = false;
 let cachedData = null;
+// Login item state when settings opened, so Save only touches it when changed
+let launchAtLoginWas = false;
 
 async function toggleSettings() {
   const body = document.getElementById('body');
@@ -211,6 +213,12 @@ async function toggleSettings() {
     } catch (err) {
       console.error(err);
     }
+    try {
+      launchAtLoginWas = await GetLaunchAtLogin();
+      document.getElementById('launch-at-login').checked = launchAtLoginWas;
+    } catch (err) {
+      console.error(err);
+    }
   } else {
     body.style.display = 'block';
     settingsView.style.display = 'none';
@@ -225,6 +233,7 @@ async function saveSettings() {
   const cookie = document.getElementById('opencode-cookie').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
   const rotateTrayLabel = document.getElementById('rotate-tray-label').checked;
+  const launchAtLogin = document.getElementById('launch-at-login').checked;
   try {
     const result = await SaveSettings(token, '', cookie, showTrayLabel, rotateTrayLabel);
     // result is the warning string from Go (string, error)
@@ -233,6 +242,17 @@ async function saveSettings() {
       showWarning(warning);
     } else {
       hideWarning();
+    }
+    if (launchAtLogin !== launchAtLoginWas) {
+      try {
+        await SetLaunchAtLogin(launchAtLogin);
+        launchAtLoginWas = launchAtLogin;
+      } catch (err) {
+        // Stay on settings so the warning isn't cleared by the usage view
+        document.getElementById('launch-at-login').checked = launchAtLoginWas;
+        showWarning(err.message || String(err));
+        return;
+      }
     }
     toggleSettings();
   } catch (err) {

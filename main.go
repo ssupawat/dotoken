@@ -1029,6 +1029,8 @@ func main() {
 		},
 	})
 
+	launchAtLogin = app.Autostart
+
 	appWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "DoToken",
 		Width:     300,

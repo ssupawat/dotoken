@@ -20,6 +20,15 @@ export function FetchUsage() {
 }
 
 /**
+ * GetLaunchAtLogin reports whether DoToken opens at login. macOS is the source
+ * of truth, so switching it off in System Settings shows up here too.
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function GetLaunchAtLogin() {
+    return $Call.ByID(1910556661);
+}
+
+/**
  * @returns {$CancellablePromise<$models.AppConfig>}
  */
 export function GetSettings() {
@@ -61,6 +70,15 @@ export function SaveProviderOrder(order) {
  */
 export function SaveSettings(zaiToken, claudeSession, openCodeCookie, showTrayLabel, rotateTrayLabel) {
     return $Call.ByID(1381577550, zaiToken, claudeSession, openCodeCookie, showTrayLabel, rotateTrayLabel);
+}
+
+/**
+ * SetLaunchAtLogin adds DoToken to, or removes it from, the user's login items.
+ * @param {boolean} enabled
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetLaunchAtLogin(enabled) {
+    return $Call.ByID(2260944233, enabled);
 }
 
 /**
