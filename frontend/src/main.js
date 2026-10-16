@@ -61,10 +61,13 @@ function renderMetric(m, providerClass) {
 
 function renderProvider(p) {
   const cls = providerClass(p.name);
-  let html = `<div class="section" draggable="true" data-provider="${p.name}">`;
+  let html = `<div class="section${p.stale ? ' stale' : ''}" draggable="true" data-provider="${p.name}">`;
   html += `<div class="section-header">`;
   html += `<span class="drag-handle" draggable="true">⋮⋮</span>`;
   html += `<div class="section-label">${p.name}</div>`;
+  if (p.stale) {
+    html += `<span class="stale-tag" title="Couldn't reach ${p.name} on the last refresh">offline · as of ${p.fetchedAt}</span>`;
+  }
   html += `</div>`;
 
   for (const m of p.metrics) {

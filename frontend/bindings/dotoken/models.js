@@ -211,6 +211,22 @@ export class ProviderUsage {
              */
             this["expired"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Stale means the latest fetch failed and these are the last numbers that
+             * came back, from FetchedAt (local "15:04")
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["stale"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["fetchedAt"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
