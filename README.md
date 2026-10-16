@@ -37,6 +37,8 @@ Usage refreshes in the background every 5 minutes. The menu bar shows the highes
 
 Settings can also be edited from the app's settings panel (tray menu → settings).
 
+If a refresh can't reach a provider (Wi-Fi drops, the Mac just woke up, the API has a hiccup), its card keeps the last numbers it got, dimmed and tagged `offline · as of 14:05`, instead of disappearing. The next successful refresh clears it.
+
 When a provider's session expires, the app shows a warning banner with how to fix it instead of silently hiding the card.
 
 ## Build

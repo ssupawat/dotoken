@@ -139,3 +139,45 @@ func TestZaiWindowMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestLastKnown(t *testing.T) {
+	cached := []ProviderUsage{
+		{Name: "OpenCode", FetchedAt: "14:05", Metrics: []Metric{{Label: "5h rolling", Pct: 42, WindowMinutes: 300}}},
+		{Name: "Z.ai", Expired: true, Metrics: []Metric{}},
+		{Name: "Claude", Metrics: []Metric{{Label: "Session", Pct: -1}}},
+	}
+
+	got := lastKnown("OpenCode", cached)
+	if got == nil {
+		t.Fatal("lastKnown(OpenCode) = nil, want the cached numbers")
+	}
+	if !got.Stale || got.FetchedAt != "14:05" || got.Metrics[0].Pct != 42 {
+		t.Errorf("lastKnown(OpenCode) = %+v, want stale copy fetched at 14:05 with 42%%", got)
+	}
+	if cached[0].Stale {
+		t.Error("lastKnown modified the cache entry")
+	}
+	got.Metrics[0].Pct = 0
+	if cached[0].Metrics[0].Pct != 42 {
+		t.Error("lastKnown shares the metrics slice with the cache")
+	}
+
+	if got := lastKnown("Z.ai", cached); got != nil {
+		t.Errorf("lastKnown(expired) = %+v, want nil so the sign-in warning is not hidden", got)
+	}
+	if got := lastKnown("Claude", cached); got != nil {
+		t.Errorf("lastKnown(loading placeholder) = %+v, want nil", got)
+	}
+	if got := lastKnown("Codex", cached); got != nil {
+		t.Errorf("lastKnown(never fetched) = %+v, want nil", got)
+	}
+}
+
+func TestStaleProvidersStayInTrayLabels(t *testing.T) {
+	providers := []ProviderUsage{
+		{Name: "OpenCode", Stale: true, FetchedAt: "14:05", Metrics: []Metric{{Pct: 42, WindowMinutes: 300}}},
+	}
+	if labels := trayLabels(providers); len(labels) != 1 {
+		t.Errorf("trayLabels() = %q, want the stale provider kept", labels)
+	}
+}

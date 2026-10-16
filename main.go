@@ -37,6 +37,10 @@ type ProviderUsage struct {
 	ResetIn    string   `json:"resetIn"`
 	ResetEpoch int64    `json:"resetEpoch"`
 	Expired    bool     `json:"expired,omitempty"`
+	// Stale means the latest fetch failed and these are the last numbers that
+	// came back, from FetchedAt (local "15:04")
+	Stale     bool   `json:"stale,omitempty"`
+	FetchedAt string `json:"fetchedAt,omitempty"`
 }
 
 type Metric struct {
@@ -382,14 +386,53 @@ func pollUsage() {
 	}
 }
 
+// fetchedNow stamps a successful fetch with the time it came back.
+func fetchedNow(p *ProviderUsage) *ProviderUsage {
+	if p != nil && !p.Expired {
+		p.FetchedAt = time.Now().Format("15:04")
+	}
+	return p
+}
+
+// lastKnown stands in for a configured provider whose fetch failed (network
+// down, the Mac just woke, a 5xx), returning its previous numbers marked stale
+// so the card and menu bar entry do not vanish. It returns nil when there is
+// nothing worth keeping.
+func lastKnown(name string, cached []ProviderUsage) *ProviderUsage {
+	for _, p := range cached {
+		if p.Name != name {
+			continue
+		}
+		if p.Expired || p.FetchedAt == "" {
+			return nil
+		}
+		p.Stale = true
+		p.Metrics = append([]Metric(nil), p.Metrics...)
+		return &p
+	}
+	return nil
+}
+
 func refreshUsage() {
+	usageMu.Lock()
+	previous := append([]ProviderUsage(nil), cachedUsage.Providers...)
+	usageMu.Unlock()
+
 	// Fetch fast providers first, emit immediately
 	var providers []ProviderUsage
-	if oc := fetchOpenCodeUsage(); oc != nil {
+	if oc := fetchedNow(fetchOpenCodeUsage()); oc != nil {
 		providers = append(providers, *oc)
+	} else if openCodeCookie() != "" {
+		if old := lastKnown("OpenCode", previous); old != nil {
+			providers = append(providers, *old)
+		}
 	}
-	if zai := fetchZaiUsage(); zai != nil {
+	if zai := fetchedNow(fetchZaiUsage()); zai != nil {
 		providers = append(providers, *zai)
+	} else if zaiToken() != "" {
+		if old := lastKnown("Z.ai", previous); old != nil {
+			providers = append(providers, *old)
+		}
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
@@ -434,13 +477,22 @@ func refreshUsage() {
 	}
 	go func() {
 		defer claudeInFlight.Store(false)
-		claude := fetchClaudeUsage()
-		if claude == nil {
-			return
-		}
+		claude := fetchedNow(fetchClaudeUsage())
 
 		usageMu.Lock()
 		defer usageMu.Unlock()
+
+		if claude == nil {
+			// Failed or backing off after a 429: keep the cached numbers but
+			// say they are old
+			for i, p := range cachedUsage.Providers {
+				if p.Name == "Claude" && !p.Stale && !p.Expired && p.FetchedAt != "" {
+					cachedUsage.Providers[i].Stale = true
+					publishUsage()
+				}
+			}
+			return
+		}
 
 		// Replace placeholder with real data
 		for i, p := range cachedUsage.Providers {
@@ -759,11 +811,15 @@ func opencodeExpired(cookie string) *ProviderUsage {
 	}
 }
 
-func fetchOpenCodeUsage() *ProviderUsage {
-	cookie := os.Getenv("OPENCODE_AUTH_COOKIE")
-	if cookie == "" {
-		cookie = (&DoToken{}).GetSettings().OpenCodeCookie
+func openCodeCookie() string {
+	if cookie := os.Getenv("OPENCODE_AUTH_COOKIE"); cookie != "" {
+		return cookie
 	}
+	return (&DoToken{}).GetSettings().OpenCodeCookie
+}
+
+func fetchOpenCodeUsage() *ProviderUsage {
+	cookie := openCodeCookie()
 	if cookie == "" {
 		return nil
 	}
@@ -923,11 +979,15 @@ func zaiWindowMinutes(limit zaiLimit) int {
 	return unit * limit.Number
 }
 
-func fetchZaiUsage() *ProviderUsage {
-	token := os.Getenv("ZAI_TOKEN")
-	if token == "" {
-		token = (&DoToken{}).GetSettings().ZaiToken
+func zaiToken() string {
+	if token := os.Getenv("ZAI_TOKEN"); token != "" {
+		return token
 	}
+	return (&DoToken{}).GetSettings().ZaiToken
+}
+
+func fetchZaiUsage() *ProviderUsage {
+	token := zaiToken()
 	if token == "" {
 		return nil
 	}
