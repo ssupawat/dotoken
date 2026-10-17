@@ -83,6 +83,34 @@ function renderProvider(p) {
   return html;
 }
 
+function formatTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+function formatCost(usd, unpriced) {
+  const s = '$' + (usd >= 100 ? Math.round(usd).toLocaleString() : usd.toFixed(2));
+  return unpriced ? s + '+' : s;
+}
+
+// Claude Code's own token use from its local logs, priced at API rates
+function renderSpend(s) {
+  const row = (label, tokens, cost) => `
+    <div class="spend-row">
+      <span class="row-label">${label}</span>
+      <span class="spend-tokens">${formatTokens(tokens)} tok</span>
+      <span class="spend-cost">${formatCost(cost, s.unpriced)}</span>
+    </div>`;
+  return `
+    <div class="spend" title="Tokens from Claude Code's local logs, priced at API rates">
+      <div class="section-header"><div class="section-label">Claude Code · API value</div></div>
+      ${row('Today', s.todayTokens, s.todayCost)}
+      ${row('7 days', s.weekTokens, s.weekCost)}
+    </div>`;
+}
+
 // ── Drag and drop reorder ──
 
 let dragSrc = null;
@@ -158,6 +186,9 @@ function render(data) {
       html += `<div class="divider"></div>`;
     }
   });
+  if (data.spend) {
+    html += `<div class="divider"></div>` + renderSpend(data.spend);
+  }
 
   document.getElementById('body').innerHTML = html;
   fitWindow();

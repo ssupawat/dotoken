@@ -8,6 +8,8 @@ A simple macOS menu bar app to monitor AI usage limits in real-time.
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
 - **Z.ai** — queries & token limits via API
 
+The popup also shows **Claude Code spend**: tokens used today and over the last 7 days, and what they would cost at Anthropic API prices. It's read from Claude Code's local logs (`~/.claude/projects`, or `CLAUDE_CONFIG_DIR`), so no network call is made. A `+` after the cost means some usage came from a model DoToken doesn't have a price for yet.
+
 ## Install
 
 ```bash
