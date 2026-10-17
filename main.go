@@ -51,6 +51,8 @@ type Metric struct {
 type AllUsage struct {
 	UpdatedAt string          `json:"updatedAt"`
 	Providers []ProviderUsage `json:"providers"`
+	// Spend is Claude Code's local token use; nil when it has no logs
+	Spend *LocalSpend `json:"spend,omitempty"`
 }
 
 // ── Wails events ────────────────────────────────────────────
@@ -398,6 +400,7 @@ func refreshUsage() {
 		json.Unmarshal(data, &cfg)
 	}
 	creds, _ := readClaudeOauth()
+	spend := fetchClaudeCodeSpend()
 	usageMu.Lock()
 	if creds != nil {
 		hasClaudeCache := false
@@ -422,6 +425,7 @@ func refreshUsage() {
 		cachedUsage = AllUsage{
 			UpdatedAt: time.Now().Format("15:04:05"),
 			Providers: providers,
+			Spend:     spend,
 		}
 		publishUsage()
 	}
