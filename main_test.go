@@ -139,3 +139,56 @@ func TestZaiWindowMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeLimitLabel(t *testing.T) {
+	tests := []struct {
+		kind   string
+		label  string
+		window int
+		ok     bool
+	}{
+		{"session", "Session", 300, true},
+		{"weekly_all", "Weekly", 10080, true},
+		{"weekly", "Weekly", 10080, true},
+		{"weekly_opus", "Weekly Opus", 10080, true},
+		{"weekly_sonnet", "Weekly Sonnet", 10080, true},
+		{"weekly_claude_design", "Weekly Claude Design", 10080, true},
+		{"extra_usage", "", 0, false},
+		{"", "", 0, false},
+	}
+	for _, tt := range tests {
+		label, window, ok := claudeLimitLabel(tt.kind)
+		if label != tt.label || window != tt.window || ok != tt.ok {
+			t.Errorf("claudeLimitLabel(%q) = %q, %d, %v; want %q, %d, %v", tt.kind, label, window, ok, tt.label, tt.window, tt.ok)
+		}
+	}
+}
+
+func TestParseClaudeLimits(t *testing.T) {
+	body := []byte(`{"limits":[
+		{"kind":"session","percent":12,"resets_at":"2026-10-18T15:00:00Z"},
+		{"kind":"weekly_all","utilization":41,"resets_at":"2026-10-22T09:00:00Z"},
+		{"kind":"weekly_opus","percent":97,"resets_at":"2026-10-22T09:00:00Z"},
+		{"kind":"extra_usage","percent":5}
+	]}`)
+	metrics, reset := parseClaudeLimits(body)
+	want := []Metric{
+		{Label: "Session", Pct: 12, WindowMinutes: 300},
+		{Label: "Weekly", Pct: 41, WindowMinutes: 10080},
+		{Label: "Weekly Opus", Pct: 97, WindowMinutes: 10080},
+	}
+	if len(metrics) != len(want) {
+		t.Fatalf("parseClaudeLimits() returned %d metrics, want %d: %+v", len(metrics), len(want), metrics)
+	}
+	for i := range want {
+		if metrics[i] != want[i] {
+			t.Errorf("metric %d = %+v, want %+v", i, metrics[i], want[i])
+		}
+	}
+	if reset != 1792335600 {
+		t.Errorf("nearest reset = %d, want 1792335600", reset)
+	}
+	if m, r := parseClaudeLimits([]byte(`not json`)); m != nil || r != 0 {
+		t.Errorf("bad JSON = %v, %d; want nil, 0", m, r)
+	}
+}

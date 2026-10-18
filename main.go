@@ -684,47 +684,7 @@ func fetchClaudeUsage() *ProviderUsage {
 		return nil
 	}
 
-	var usage struct {
-		Limits []struct {
-			Kind        string  `json:"kind"`
-			Percent     float64 `json:"percent"`
-			Utilization float64 `json:"utilization"`
-			ResetsAt    string  `json:"resets_at"`
-		} `json:"limits"`
-	}
-	if err := json.Unmarshal(body, &usage); err != nil {
-		return nil
-	}
-
-	nameMap := map[string]string{
-		"session":    "Session",
-		"weekly_all": "Weekly",
-	}
-	windows := map[string]int{
-		"session":    300,
-		"weekly_all": 7 * 24 * 60,
-	}
-	var metrics []Metric
-	var nearestReset int64
-	for _, l := range usage.Limits {
-		label, ok := nameMap[l.Kind]
-		if !ok {
-			continue
-		}
-		pct := l.Percent
-		if pct == 0 {
-			pct = l.Utilization
-		}
-		m := Metric{Label: label, Pct: pct}
-		m.WindowMinutes = windows[l.Kind]
-		if t, err := time.Parse(time.RFC3339, l.ResetsAt); err == nil {
-			epoch := t.Unix()
-			if nearestReset == 0 || epoch < nearestReset {
-				nearestReset = epoch
-			}
-		}
-		metrics = append(metrics, m)
-	}
+	metrics, nearestReset := parseClaudeLimits(body)
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -738,6 +698,70 @@ func fetchClaudeUsage() *ProviderUsage {
 		Metrics: metrics,
 		ResetIn: resetStr,
 	}
+}
+
+// claudeLimitLabel turns a usage limit kind into its popup label and window
+// length. Besides session and weekly_all, the API reports model-specific caps
+// such as weekly_opus, which can run out while the overall limit has room.
+// Kinds outside the session and weekly families are not quota and are skipped.
+func claudeLimitLabel(kind string) (string, int, bool) {
+	family, model, _ := strings.Cut(kind, "_")
+	var label string
+	var window int
+	switch family {
+	case "session":
+		label, window = "Session", 300
+	case "weekly":
+		label, window = "Weekly", 7*24*60
+	default:
+		return "", 0, false
+	}
+	if model == "" || model == "all" {
+		return label, window, true
+	}
+	for _, w := range strings.Split(model, "_") {
+		if w != "" {
+			label += " " + strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return label, window, true
+}
+
+// parseClaudeLimits reads the OAuth usage response into metrics and the
+// nearest reset epoch, 0 when no limit reports one.
+func parseClaudeLimits(body []byte) ([]Metric, int64) {
+	var usage struct {
+		Limits []struct {
+			Kind        string  `json:"kind"`
+			Percent     float64 `json:"percent"`
+			Utilization float64 `json:"utilization"`
+			ResetsAt    string  `json:"resets_at"`
+		} `json:"limits"`
+	}
+	if err := json.Unmarshal(body, &usage); err != nil {
+		return nil, 0
+	}
+
+	var metrics []Metric
+	var nearestReset int64
+	for _, l := range usage.Limits {
+		label, window, ok := claudeLimitLabel(l.Kind)
+		if !ok {
+			continue
+		}
+		pct := l.Percent
+		if pct == 0 {
+			pct = l.Utilization
+		}
+		metrics = append(metrics, Metric{Label: label, Pct: pct, WindowMinutes: window})
+		if t, err := time.Parse(time.RFC3339, l.ResetsAt); err == nil {
+			epoch := t.Unix()
+			if nearestReset == 0 || epoch < nearestReset {
+				nearestReset = epoch
+			}
+		}
+	}
+	return metrics, nearestReset
 }
 
 // ── OpenCode Go (web scraping) ──────────────────────────
