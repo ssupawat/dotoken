@@ -94,6 +94,14 @@ export class AppConfig {
              */
             this["staticTrayLabel"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * CopilotToken overrides the GitHub token found from Copilot or the gh CLI
+             * @member
+             * @type {string | undefined}
+             */
+            this["copilotToken"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
