@@ -139,3 +139,62 @@ func TestZaiWindowMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCopilotUsage(t *testing.T) {
+	t.Run("paid plan skips unlimited quotas", func(t *testing.T) {
+		body := []byte(`{
+			"copilot_plan": "individual",
+			"quota_reset_date": "2026-11-01",
+			"quota_snapshots": {
+				"chat": {"entitlement": 0, "remaining": 0, "percent_remaining": 100, "unlimited": true},
+				"completions": {"entitlement": 0, "remaining": 0, "percent_remaining": 100, "unlimited": true},
+				"premium_interactions": {"entitlement": 300, "remaining": 75, "percent_remaining": 25, "unlimited": false}
+			}
+		}`)
+		got := parseCopilotUsage(body)
+		if got == nil {
+			t.Fatal("got nil")
+		}
+		if got.Name != "Copilot" || len(got.Metrics) != 1 {
+			t.Fatalf("got %+v", got)
+		}
+		m := got.Metrics[0]
+		if m.Label != "Premium" || m.Pct != 75 || m.Used != 225 || m.Max != 300 || m.WindowMinutes != 30*24*60 {
+			t.Errorf("got %+v", m)
+		}
+		if want := int64(1793491200); got.ResetEpoch != want {
+			t.Errorf("reset epoch = %d, want %d", got.ResetEpoch, want)
+		}
+	})
+
+	t.Run("free plan uses counts", func(t *testing.T) {
+		body := []byte(`{
+			"limited_user_reset_date": "2026-11-05",
+			"limited_user_quotas": {"chat": 40, "completions": 1500},
+			"monthly_quotas": {"chat": 50, "completions": 2000}
+		}`)
+		got := parseCopilotUsage(body)
+		if got == nil || len(got.Metrics) != 2 {
+			t.Fatalf("got %+v", got)
+		}
+		if m := got.Metrics[0]; m.Label != "Chat" || m.Pct != 20 {
+			t.Errorf("chat = %+v", m)
+		}
+		if m := got.Metrics[1]; m.Label != "Completions" || m.Pct != 25 {
+			t.Errorf("completions = %+v", m)
+		}
+	})
+
+	t.Run("nothing metered", func(t *testing.T) {
+		body := []byte(`{"quota_snapshots": {"premium_interactions": {"unlimited": true}}}`)
+		if got := parseCopilotUsage(body); got != nil {
+			t.Errorf("got %+v, want nil", got)
+		}
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		if got := parseCopilotUsage([]byte(`<html>`)); got != nil {
+			t.Errorf("got %+v, want nil", got)
+		}
+	})
+}

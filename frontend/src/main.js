@@ -24,6 +24,7 @@ function providerClass(name) {
   if (n.includes('opencode')) return 'opencode';
   if (n.includes('openai')) return 'openai';
   if (n.includes('z.ai')) return 'zai';
+  if (n.includes('copilot')) return 'copilot';
   return '';
 }
 

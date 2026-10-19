@@ -71,6 +71,8 @@ type AppConfig struct {
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
 	// StaticTrayLabel turns off the rotation, leaving one provider on screen
 	StaticTrayLabel bool `json:"staticTrayLabel,omitempty"`
+	// CopilotToken overrides the GitHub token found from Copilot or the gh CLI
+	CopilotToken string `json:"copilotToken,omitempty"`
 }
 
 func getConfigPath() string {
@@ -219,6 +221,8 @@ func providerShort(name string) string {
 		return "OC"
 	case "Z.ai":
 		return "Z"
+	case "Copilot":
+		return "CP"
 	default:
 		return name
 	}
@@ -390,6 +394,9 @@ func refreshUsage() {
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
+	}
+	if cp := fetchCopilotUsage(); cp != nil {
+		providers = append(providers, *cp)
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
@@ -992,6 +999,193 @@ func fetchZaiUsage() *ProviderUsage {
 		ResetIn:    resetIn,
 		ResetEpoch: resetEpoch,
 	}
+}
+
+// ── GitHub Copilot (internal user API) ──────────────────────
+
+// readCopilotToken finds a GitHub OAuth token that the Copilot user API
+// accepts: the configured override, the token a Copilot editor plugin stored
+// on sign-in, then the gh CLI's token. It reports which source it used so a
+// 401 can say how to sign in again.
+func readCopilotToken() (token, source string) {
+	if t := os.Getenv("COPILOT_TOKEN"); t != "" {
+		return t, "config"
+	}
+	if t := (&DoToken{}).GetSettings().CopilotToken; t != "" {
+		return t, "config"
+	}
+
+	// VS Code, JetBrains and Neovim Copilot plugins share this directory
+	home, _ := os.UserHomeDir()
+	for _, name := range []string{"apps.json", "hosts.json"} {
+		data, err := os.ReadFile(filepath.Join(home, ".config", "github-copilot", name))
+		if err != nil {
+			continue
+		}
+		var hosts map[string]struct {
+			OauthToken string `json:"oauth_token"`
+		}
+		if json.Unmarshal(data, &hosts) != nil {
+			continue
+		}
+		for host, h := range hosts {
+			if (host == "github.com" || strings.HasPrefix(host, "github.com:")) && h.OauthToken != "" {
+				return h.OauthToken, "editor"
+			}
+		}
+	}
+
+	// Apps launched from Finder get a minimal PATH, so try Homebrew's too
+	for _, gh := range []string{"gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"} {
+		path, err := exec.LookPath(gh)
+		if err != nil {
+			continue
+		}
+		out, err := exec.Command(path, "auth", "token", "--hostname", "github.com").Output()
+		if t := strings.TrimSpace(string(out)); err == nil && t != "" {
+			return t, "gh"
+		}
+	}
+	return "", ""
+}
+
+type copilotQuota struct {
+	Entitlement      float64 `json:"entitlement"`
+	Remaining        float64 `json:"remaining"`
+	PercentRemaining float64 `json:"percent_remaining"`
+	Unlimited        bool    `json:"unlimited"`
+}
+
+type copilotUser struct {
+	QuotaResetDate string                  `json:"quota_reset_date"`
+	QuotaSnapshots map[string]copilotQuota `json:"quota_snapshots"`
+	// Copilot Free reports its allowance as counts instead of snapshots
+	LimitedUserQuotas    map[string]float64 `json:"limited_user_quotas"`
+	MonthlyQuotas        map[string]float64 `json:"monthly_quotas"`
+	LimitedUserResetDate string             `json:"limited_user_reset_date"`
+}
+
+// parseCopilotUsage turns the copilot_internal/user response into a card.
+// Unlimited quotas are left out; it returns nil when nothing is metered.
+func parseCopilotUsage(body []byte) *ProviderUsage {
+	var u copilotUser
+	if err := json.Unmarshal(body, &u); err != nil {
+		return nil
+	}
+
+	quotas := []struct{ key, label string }{
+		{"premium_interactions", "Premium"},
+		{"chat", "Chat"},
+		{"completions", "Completions"},
+	}
+	const monthMinutes = 30 * 24 * 60
+	var metrics []Metric
+	for _, q := range quotas {
+		if snap, ok := u.QuotaSnapshots[q.key]; ok {
+			if snap.Unlimited || snap.Entitlement <= 0 {
+				continue
+			}
+			pct := 100 - snap.PercentRemaining
+			metrics = append(metrics, Metric{
+				Label:         q.label,
+				Used:          snap.Entitlement - snap.Remaining,
+				Max:           snap.Entitlement,
+				Pct:           math.Max(0, math.Min(100, pct)),
+				WindowMinutes: monthMinutes,
+			})
+			continue
+		}
+		total := u.MonthlyQuotas[q.key]
+		if total <= 0 {
+			continue
+		}
+		remaining, ok := u.LimitedUserQuotas[q.key]
+		if !ok {
+			continue
+		}
+		used := total - remaining
+		metrics = append(metrics, Metric{
+			Label:         q.label,
+			Used:          used,
+			Max:           total,
+			Pct:           math.Max(0, math.Min(100, used/total*100)),
+			WindowMinutes: monthMinutes,
+		})
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	resetDate := u.QuotaResetDate
+	if resetDate == "" {
+		resetDate = u.LimitedUserResetDate
+	}
+	var resetEpoch int64
+	// The reset date is a plain YYYY-MM-DD; quotas roll over at 00:00 UTC
+	if t, err := time.Parse("2006-01-02", resetDate); err == nil {
+		resetEpoch = t.Unix()
+	} else if t, err := time.Parse(time.RFC3339, resetDate); err == nil {
+		resetEpoch = t.Unix()
+	}
+	return &ProviderUsage{
+		Name:       "Copilot",
+		Metrics:    metrics,
+		ResetIn:    formatResetTime(resetEpoch),
+		ResetEpoch: resetEpoch,
+	}
+}
+
+func copilotExpired(source string) *ProviderUsage {
+	fix := "run: gh auth login"
+	switch source {
+	case "config":
+		fix = "update copilotToken in ~/.dotoken.json"
+	case "editor":
+		fix = "sign in to Copilot again in your editor"
+	}
+	return &ProviderUsage{
+		Name:    "Copilot",
+		Expired: true,
+		Metrics: []Metric{},
+		ResetIn: "GitHub sign-in expired — " + fix,
+	}
+}
+
+func fetchCopilotUsage() *ProviderUsage {
+	token, source := readCopilotToken()
+	if token == "" {
+		return nil
+	}
+
+	req, err := http.NewRequest("GET", "https://api.github.com/copilot_internal/user", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Editor-Version", "vscode/1.99.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.0")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.0")
+	req.Header.Set("X-Github-Api-Version", "2025-04-01")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("copilot: request failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == 401 {
+		return copilotExpired(source)
+	}
+	if resp.StatusCode != 200 {
+		// 404 means the account has no Copilot seat; stay hidden
+		log.Printf("copilot: usage request failed: %d", resp.StatusCode)
+		return nil
+	}
+	return parseCopilotUsage(body)
 }
 
 // ── Helpers ─────────────────────────────────────────────────
