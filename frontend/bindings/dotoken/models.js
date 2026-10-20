@@ -211,6 +211,22 @@ export class ProviderUsage {
              */
             this["expired"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * StatusIndicator is the provider's status page indicator (minor, major,
+             * critical or maintenance); empty while the service is operational
+             * @member
+             * @type {string | undefined}
+             */
+            this["statusIndicator"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["statusText"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

@@ -244,6 +244,20 @@
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
   .crit .row-pct  { color: #ef4444; }
 
+  /* ── Service status ── */
+  .status-row {
+    padding: 0 18px 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: currentColor; }
+  .status-row.minor { color: #f59e0b; }
+  .status-row.major { color: #ef4444; }
+  .status-row.maint { color: var(--zai); }
+
   /* ── Reset timer ── */
   .reset-row {
     padding: 3px 18px;

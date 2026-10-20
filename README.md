@@ -37,6 +37,8 @@ Usage refreshes in the background every 5 minutes. The menu bar shows the highes
 
 Settings can also be edited from the app's settings panel (tray menu → settings).
 
+When Claude's [status page](https://status.claude.com) reports an incident or maintenance, the Claude card shows it (e.g. `● Partial System Outage`), so you can tell an outage from a usage limit.
+
 When a provider's session expires, the app shows a warning banner with how to fix it instead of silently hiding the card.
 
 ## Build
