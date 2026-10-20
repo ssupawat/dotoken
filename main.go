@@ -37,6 +37,10 @@ type ProviderUsage struct {
 	ResetIn    string   `json:"resetIn"`
 	ResetEpoch int64    `json:"resetEpoch"`
 	Expired    bool     `json:"expired,omitempty"`
+	// StatusIndicator is the provider's status page indicator (minor, major,
+	// critical or maintenance); empty while the service is operational
+	StatusIndicator string `json:"statusIndicator,omitempty"`
+	StatusText      string `json:"statusText,omitempty"`
 }
 
 type Metric struct {
@@ -168,6 +172,7 @@ const trayRotateInterval = 4 * time.Second
 // publishUsage pushes cachedUsage to the popup and the menu bar label.
 // Callers must hold usageMu.
 func publishUsage() {
+	applyServiceStatus(cachedUsage.Providers)
 	if appWindow != nil {
 		appWindow.EmitEvent("usage", cachedUsage)
 	}
@@ -383,6 +388,8 @@ func pollUsage() {
 }
 
 func refreshUsage() {
+	go refreshServiceStatus()
+
 	// Fetch fast providers first, emit immediately
 	var providers []ProviderUsage
 	if oc := fetchOpenCodeUsage(); oc != nil {
@@ -945,6 +952,108 @@ func fetchZaiUsage() *ProviderUsage {
 		Metrics:    metrics,
 		ResetIn:    resetIn,
 		ResetEpoch: resetEpoch,
+	}
+}
+
+// ── Service status (Statuspage) ─────────────────────────────
+
+// statusPages maps a provider to its public Statuspage summary, so the popup can
+// tell an outage apart from a usage limit. Providers without one are skipped.
+var statusPages = map[string]string{
+	"Claude": "https://status.claude.com/api/v2/status.json",
+}
+
+type ServiceStatus struct {
+	Indicator   string
+	Description string
+}
+
+// serviceStatus holds the latest incident per provider; guarded by usageMu.
+var serviceStatus = map[string]ServiceStatus{}
+
+// statusCheckedAt throttles status checks, since opening the popup also refreshes
+var statusCheckedAt atomic.Int64
+
+const statusCheckInterval = time.Minute
+
+// parseStatusPage reads a Statuspage /api/v2/status.json body. It returns the
+// zero ServiceStatus when everything is operational.
+func parseStatusPage(body []byte) (ServiceStatus, error) {
+	var page struct {
+		Status struct {
+			Indicator   string `json:"indicator"`
+			Description string `json:"description"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return ServiceStatus{}, err
+	}
+	if page.Status.Indicator == "" {
+		return ServiceStatus{}, fmt.Errorf("status page has no indicator")
+	}
+	if page.Status.Indicator == "none" {
+		return ServiceStatus{}, nil
+	}
+	return ServiceStatus{Indicator: page.Status.Indicator, Description: page.Status.Description}, nil
+}
+
+func fetchServiceStatus(url string) (ServiceStatus, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return ServiceStatus{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ServiceStatus{}, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ServiceStatus{}, err
+	}
+	return parseStatusPage(body)
+}
+
+// refreshServiceStatus checks each status page and republishes when anything
+// changed. A failed check keeps the last known status.
+func refreshServiceStatus() {
+	now := time.Now().UnixMilli()
+	last := statusCheckedAt.Load()
+	if now-last < statusCheckInterval.Milliseconds() || !statusCheckedAt.CompareAndSwap(last, now) {
+		return
+	}
+
+	fresh := map[string]ServiceStatus{}
+	for name, url := range statusPages {
+		st, err := fetchServiceStatus(url)
+		if err != nil {
+			log.Printf("%s: status check failed: %v", strings.ToLower(name), err)
+			continue
+		}
+		fresh[name] = st
+	}
+
+	usageMu.Lock()
+	defer usageMu.Unlock()
+	changed := false
+	for name, st := range fresh {
+		if serviceStatus[name] != st {
+			serviceStatus[name] = st
+			changed = true
+		}
+	}
+	if changed && len(cachedUsage.Providers) > 0 {
+		publishUsage()
+	}
+}
+
+// applyServiceStatus copies the latest incidents onto the providers.
+// Callers must hold usageMu.
+func applyServiceStatus(providers []ProviderUsage) {
+	for i := range providers {
+		st := serviceStatus[providers[i].Name]
+		providers[i].StatusIndicator = st.Indicator
+		providers[i].StatusText = st.Description
 	}
 }
 

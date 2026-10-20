@@ -59,6 +59,22 @@ function renderMetric(m, providerClass) {
     </div>`;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// Incident from the provider's status page, so an outage is not mistaken for a limit
+function renderStatus(p) {
+  if (!p.statusIndicator) return '';
+  const level = p.statusIndicator === 'maintenance' ? 'maint'
+    : p.statusIndicator === 'minor' ? 'minor' : 'major';
+  return `
+    <div class="status-row ${level}">
+      <span class="status-dot"></span>
+      <span class="status-text">${escapeHtml(p.statusText || p.statusIndicator)}</span>
+    </div>`;
+}
+
 function renderProvider(p) {
   const cls = providerClass(p.name);
   let html = `<div class="section" draggable="true" data-provider="${p.name}">`;
@@ -66,6 +82,7 @@ function renderProvider(p) {
   html += `<span class="drag-handle" draggable="true">⋮⋮</span>`;
   html += `<div class="section-label">${p.name}</div>`;
   html += `</div>`;
+  html += renderStatus(p);
 
   for (const m of p.metrics) {
     html += renderMetric(m, cls);

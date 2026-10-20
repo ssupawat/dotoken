@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestTrayLabel(t *testing.T) {
 	tests := []struct {
@@ -193,5 +197,90 @@ func TestParseOpenCodeUsageEmpty(t *testing.T) {
 	}
 	if p := parseOpenCodeUsage([]byte(`not json`)); p != nil {
 		t.Errorf("expected nil for invalid json, got %+v", p)
+	}
+}
+
+func TestParseStatusPage(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		want    ServiceStatus
+		wantErr bool
+	}{
+		{"operational", `{"page":{"id":"x"},"status":{"indicator":"none","description":"All Systems Operational"}}`, ServiceStatus{}, false},
+		{"minor incident", `{"status":{"indicator":"minor","description":"Partially Degraded Service"}}`, ServiceStatus{"minor", "Partially Degraded Service"}, false},
+		{"major outage", `{"status":{"indicator":"major","description":"Partial System Outage"}}`, ServiceStatus{"major", "Partial System Outage"}, false},
+		{"missing indicator", `{"status":{}}`, ServiceStatus{}, true},
+		{"not json", `<html>`, ServiceStatus{}, true},
+	}
+	for _, tt := range tests {
+		got, err := parseStatusPage([]byte(tt.body))
+		if (err != nil) != tt.wantErr {
+			t.Errorf("%s: parseStatusPage() error = %v, wantErr %v", tt.name, err, tt.wantErr)
+		}
+		if got != tt.want {
+			t.Errorf("%s: parseStatusPage() = %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestApplyServiceStatus(t *testing.T) {
+	saved := serviceStatus
+	defer func() { serviceStatus = saved }()
+	serviceStatus = map[string]ServiceStatus{"Claude": {"major", "Partial System Outage"}}
+
+	providers := []ProviderUsage{
+		{Name: "Claude"},
+		{Name: "Z.ai", StatusIndicator: "minor", StatusText: "stale"},
+	}
+	applyServiceStatus(providers)
+	if providers[0].StatusIndicator != "major" || providers[0].StatusText != "Partial System Outage" {
+		t.Errorf("Claude status = %q/%q, want major/Partial System Outage", providers[0].StatusIndicator, providers[0].StatusText)
+	}
+	if providers[1].StatusIndicator != "" || providers[1].StatusText != "" {
+		t.Errorf("Z.ai status should be cleared, got %q/%q", providers[1].StatusIndicator, providers[1].StatusText)
+	}
+}
+
+func TestRefreshServiceStatusKeepsLastKnownOnFailure(t *testing.T) {
+	savedPages, savedStatus := statusPages, serviceStatus
+	defer func() { statusPages, serviceStatus = savedPages, savedStatus }()
+
+	body := `{"status":{"indicator":"major","description":"Partial System Outage"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if body == "" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	statusPages = map[string]string{"Claude": srv.URL}
+	serviceStatus = map[string]ServiceStatus{}
+
+	statusCheckedAt.Store(0)
+	refreshServiceStatus()
+	if got := serviceStatus["Claude"]; got.Indicator != "major" {
+		t.Fatalf("after outage, status = %+v, want major", got)
+	}
+
+	// A failing status page must not clear the incident
+	body = ""
+	statusCheckedAt.Store(0)
+	refreshServiceStatus()
+	if got := serviceStatus["Claude"]; got.Indicator != "major" {
+		t.Errorf("after failed check, status = %+v, want last known major", got)
+	}
+
+	// Checks inside the throttle window are skipped
+	body = `{"status":{"indicator":"none","description":"All Systems Operational"}}`
+	refreshServiceStatus()
+	if got := serviceStatus["Claude"]; got.Indicator != "major" {
+		t.Errorf("throttled check changed status to %+v", got)
+	}
+	statusCheckedAt.Store(0)
+	refreshServiceStatus()
+	if got := serviceStatus["Claude"]; got != (ServiceStatus{}) {
+		t.Errorf("after recovery, status = %+v, want operational", got)
 	}
 }
