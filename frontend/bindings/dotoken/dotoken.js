@@ -54,13 +54,13 @@ export function SaveProviderOrder(order) {
 /**
  * @param {string} zaiToken
  * @param {string} claudeSession
- * @param {string} openCodeCookie
+ * @param {string} opencodeApiKey
  * @param {boolean} showTrayLabel
  * @param {boolean} rotateTrayLabel
  * @returns {$CancellablePromise<string>}
  */
-export function SaveSettings(zaiToken, claudeSession, openCodeCookie, showTrayLabel, rotateTrayLabel) {
-    return $Call.ByID(1381577550, zaiToken, claudeSession, openCodeCookie, showTrayLabel, rotateTrayLabel);
+export function SaveSettings(zaiToken, claudeSession, opencodeApiKey, showTrayLabel, rotateTrayLabel) {
+    return $Call.ByID(1381577550, zaiToken, claudeSession, opencodeApiKey, showTrayLabel, rotateTrayLabel);
 }
 
 /**

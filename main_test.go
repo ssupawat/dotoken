@@ -139,3 +139,59 @@ func TestZaiWindowMinutes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOpenCodeUsage(t *testing.T) {
+	body := []byte(`{
+		"useBalance": false,
+		"usage": {
+			"rolling": { "status": "ok", "percent": 11, "resetsAt": "2026-08-17T17:10:09.580Z" },
+			"weekly":  { "status": "ok", "percent": 4,  "resetsAt": "2026-08-24T00:00:00.580Z" },
+			"monthly": { "status": "ok", "percent": 2,  "resetsAt": "2026-09-13T04:26:00.580Z" }
+		}
+	}`)
+
+	p := parseOpenCodeUsage(body)
+	if p == nil {
+		t.Fatal("expected provider usage, got nil")
+	}
+	if p.Name != "OpenCode" {
+		t.Errorf("Name = %q, want OpenCode", p.Name)
+	}
+	want := []struct {
+		label   string
+		pct     float64
+		minutes int
+	}{
+		{"5h rolling", 11, 300},
+		{"Weekly", 4, 7 * 24 * 60},
+		{"Monthly", 2, 30 * 24 * 60},
+	}
+	if len(p.Metrics) != len(want) {
+		t.Fatalf("got %d metrics, want %d", len(p.Metrics), len(want))
+	}
+	for i, w := range want {
+		if p.Metrics[i].Label != w.label {
+			t.Errorf("metric[%d].Label = %q, want %q", i, p.Metrics[i].Label, w.label)
+		}
+		if p.Metrics[i].Pct != w.pct {
+			t.Errorf("metric[%d].Pct = %v, want %v", i, p.Metrics[i].Pct, w.pct)
+		}
+		if p.Metrics[i].WindowMinutes != w.minutes {
+			t.Errorf("metric[%d].WindowMinutes = %d, want %d", i, p.Metrics[i].WindowMinutes, w.minutes)
+		}
+	}
+
+	wantReset := int64(1786986609) // 2026-08-17T17:10:09Z, the earliest resetsAt
+	if p.ResetEpoch != wantReset {
+		t.Errorf("ResetEpoch = %d, want %d", p.ResetEpoch, wantReset)
+	}
+}
+
+func TestParseOpenCodeUsageEmpty(t *testing.T) {
+	if p := parseOpenCodeUsage([]byte(`{}`)); p != nil {
+		t.Errorf("expected nil for empty usage, got %+v", p)
+	}
+	if p := parseOpenCodeUsage([]byte(`not json`)); p != nil {
+		t.Errorf("expected nil for invalid json, got %+v", p)
+	}
+}

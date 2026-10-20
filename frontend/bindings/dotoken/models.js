@@ -65,12 +65,12 @@ export class AppConfig {
              */
             this["claudeSession"] = "";
         }
-        if (!("openCodeCookie" in $$source)) {
+        if (!("opencodeApiKey" in $$source)) {
             /**
              * @member
              * @type {string}
              */
-            this["openCodeCookie"] = "";
+            this["opencodeApiKey"] = "";
         }
         if (!("providerOrder" in $$source)) {
             /**

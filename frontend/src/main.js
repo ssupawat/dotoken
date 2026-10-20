@@ -205,7 +205,7 @@ async function toggleSettings() {
     try {
       const cfg = await GetSettings();
       document.getElementById('zai-token').value = cfg.zaiToken || '';
-      document.getElementById('opencode-cookie').value = cfg.openCodeCookie || '';
+      document.getElementById('opencode-api-key').value = cfg.opencodeApiKey || '';
       document.getElementById('show-tray-label').checked = !cfg.hideTrayLabel;
       document.getElementById('rotate-tray-label').checked = !cfg.staticTrayLabel;
     } catch (err) {
@@ -222,11 +222,11 @@ async function toggleSettings() {
 
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
-  const cookie = document.getElementById('opencode-cookie').value.trim();
+  const apiKey = document.getElementById('opencode-api-key').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
   const rotateTrayLabel = document.getElementById('rotate-tray-label').checked;
   try {
-    const result = await SaveSettings(token, '', cookie, showTrayLabel, rotateTrayLabel);
+    const result = await SaveSettings(token, '', apiKey, showTrayLabel, rotateTrayLabel);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {

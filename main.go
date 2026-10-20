@@ -66,7 +66,7 @@ type DoToken struct{}
 type AppConfig struct {
 	ZaiToken       string   `json:"zaiToken"`
 	ClaudeSession  string   `json:"claudeSession"`
-	OpenCodeCookie string   `json:"openCodeCookie"`
+	OpencodeApiKey string   `json:"opencodeApiKey"`
 	ProviderOrder  []string `json:"providerOrder"`
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
 	// StaticTrayLabel turns off the rotation, leaving one provider on screen
@@ -78,12 +78,12 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, openCodeCookie string, showTrayLabel, rotateTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
 	cfg.ClaudeSession = claudeSession
-	cfg.OpenCodeCookie = openCodeCookie
+	cfg.OpencodeApiKey = opencodeApiKey
 	cfg.HideTrayLabel = !showTrayLabel
 	cfg.StaticTrayLabel = !rotateTrayLabel
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -740,143 +740,59 @@ func fetchClaudeUsage() *ProviderUsage {
 	}
 }
 
-// ── OpenCode Go (web scraping) ──────────────────────────
+// ── OpenCode Go (official usage API) ────────────────────────
 
-func opencodeExpired(cookie string) *ProviderUsage {
-	if !strings.Contains(cookie, "__Host-console_session") {
-		return &ProviderUsage{
-			Name:    "OpenCode",
-			Expired: true,
-			Metrics: []Metric{},
-			ResetIn: "cookie incomplete — copy the full Cookie header (must include __Host-console_session)",
-		}
-	}
+type opencodeWindow struct {
+	Status   string  `json:"status"`
+	Percent  float64 `json:"percent"`
+	ResetsAt string  `json:"resetsAt"`
+}
+
+type opencodeUsageResponse struct {
+	UseBalance bool `json:"useBalance"`
+	Usage     struct {
+		Rolling opencodeWindow `json:"rolling"`
+		Weekly  opencodeWindow `json:"weekly"`
+		Monthly opencodeWindow `json:"monthly"`
+	} `json:"usage"`
+}
+
+func opencodeExpired(msg string) *ProviderUsage {
 	return &ProviderUsage{
 		Name:    "OpenCode",
 		Expired: true,
 		Metrics: []Metric{},
-		ResetIn: "session expired — paste fresh Cookie header from opencode.ai console",
+		ResetIn: msg,
 	}
 }
 
-func fetchOpenCodeUsage() *ProviderUsage {
-	cookie := os.Getenv("OPENCODE_AUTH_COOKIE")
-	if cookie == "" {
-		cookie = (&DoToken{}).GetSettings().OpenCodeCookie
-	}
-	if cookie == "" {
-		return nil
-	}
-	// Users paste the full Cookie header from opencode.ai — it must include
-	// both auth= and __Host-console_session= (auth alone is rejected with 401)
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	// Resolve the org (workspace) that holds the Go subscription
-	req, err := http.NewRequest("GET", "https://opencode.ai/console/api/orgs", nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Accept", "*/*")
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("opencode: request failed: %v", err)
-		return nil
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	if resp.StatusCode == 401 {
-		return opencodeExpired(cookie)
-	}
-	var orgs []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(body, &orgs); err != nil || len(orgs) == 0 {
-		log.Printf("opencode: no orgs found (status %d)", resp.StatusCode)
+func parseOpenCodeUsage(body []byte) *ProviderUsage {
+	var result opencodeUsageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil
 	}
 
-	// Query go/status per org; first org with a Go plan wins
-	var status *struct {
-		Access struct {
-			Meters map[string]struct {
-				LimitMicroCents string `json:"limitMicroCents"`
-				UsedMicroCents  string `json:"usedMicroCents"`
-				ResetsAt        string `json:"resetsAt"`
-			} `json:"meters"`
-		} `json:"access"`
-	}
-	unauthorized := false
-	for _, org := range orgs {
-		req, err := http.NewRequest("GET", "https://opencode.ai/console/api/go/status", nil)
-		if err != nil {
-			return nil
-		}
-		req.Header.Set("Cookie", cookie)
-		req.Header.Set("x-org-id", org.ID)
-		req.Header.Set("Accept", "*/*")
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("opencode: request failed: %v", err)
-			continue
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode == 401 || strings.Contains(string(body), "_tag\":\"Unauthorized") {
-			unauthorized = true
-			continue
-		}
-		if resp.StatusCode != 200 {
-			continue
-		}
-		var s struct {
-			Access struct {
-				Meters map[string]struct {
-					LimitMicroCents string `json:"limitMicroCents"`
-					UsedMicroCents  string `json:"usedMicroCents"`
-					ResetsAt        string `json:"resetsAt"`
-				} `json:"meters"`
-			} `json:"access"`
-		}
-		if err := json.Unmarshal(body, &s); err != nil {
-			continue
-		}
-		status = &s
-		break
+	windows := []struct {
+		label   string
+		minutes int
+		window  opencodeWindow
+	}{
+		{"5h rolling", 300, result.Usage.Rolling},
+		{"Weekly", 7 * 24 * 60, result.Usage.Weekly},
+		{"Monthly", 30 * 24 * 60, result.Usage.Monthly},
 	}
 
-	if status == nil {
-		if unauthorized {
-			return opencodeExpired(cookie)
-		}
-		log.Printf("opencode: no Go subscription found in any org")
-		return nil
-	}
-
-	nameMap := map[string]string{"fiveHour": "5h rolling", "week": "Weekly", "month": "Monthly"}
-	windows := map[string]int{"fiveHour": 300, "week": 7 * 24 * 60, "month": 30 * 24 * 60}
 	var metrics []Metric
 	var nearestReset int64
-	for _, key := range []string{"fiveHour", "week", "month"} {
-		m, ok := status.Access.Meters[key]
-		if !ok {
+	for _, w := range windows {
+		if w.window.ResetsAt == "" {
 			continue
 		}
-		limit, _ := strconv.ParseFloat(m.LimitMicroCents, 64)
-		used, _ := strconv.ParseFloat(m.UsedMicroCents, 64)
-		if limit <= 0 {
-			continue
-		}
-		metric := Metric{Label: nameMap[key], Pct: used / limit * 100}
-		if m.ResetsAt != "" {
-			if t, err := time.Parse(time.RFC3339, m.ResetsAt); err == nil {
-				metric.WindowMinutes = windows[key]
-				epoch := t.Unix()
-				if nearestReset == 0 || epoch < nearestReset {
-					nearestReset = epoch
-				}
+		metric := Metric{Label: w.label, Pct: w.window.Percent, WindowMinutes: w.minutes}
+		if t, err := time.Parse(time.RFC3339, w.window.ResetsAt); err == nil {
+			epoch := t.Unix()
+			if nearestReset == 0 || epoch < nearestReset {
+				nearestReset = epoch
 			}
 		}
 		metrics = append(metrics, metric)
@@ -890,9 +806,47 @@ func fetchOpenCodeUsage() *ProviderUsage {
 		resetStr = formatResetTime(nearestReset)
 	}
 	return &ProviderUsage{
-		Name:    "OpenCode",
-		Metrics: metrics,
-		ResetIn: resetStr,
+		Name:       "OpenCode",
+		Metrics:    metrics,
+		ResetIn:    resetStr,
+		ResetEpoch: nearestReset,
+	}
+}
+
+func fetchOpenCodeUsage() *ProviderUsage {
+	apiKey := os.Getenv("OPENCODE_API_KEY")
+	if apiKey == "" {
+		apiKey = (&DoToken{}).GetSettings().OpencodeApiKey
+	}
+	if apiKey == "" {
+		return nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", "https://opencode.ai/zen/go/v1/usage", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("opencode: request failed: %v", err)
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	switch resp.StatusCode {
+	case 401:
+		return opencodeExpired("API key rejected — paste a fresh key from opencode.ai/auth")
+	case 403:
+		return opencodeExpired("OpenCode Go subscription required")
+	case 200:
+		return parseOpenCodeUsage(body)
+	default:
+		log.Printf("opencode: unexpected status %d", resp.StatusCode)
+		return nil
 	}
 }
 
