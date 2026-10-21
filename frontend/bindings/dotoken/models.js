@@ -94,6 +94,15 @@ export class AppConfig {
              */
             this["staticTrayLabel"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * TrayHidden lists providers left out of the menu bar label; they still
+             * show in the popup
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["trayHidden"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -105,9 +114,13 @@ export class AppConfig {
      */
     static createFrom($$source = {}) {
         const $$createField3_0 = $$createType2;
+        const $$createField6_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("providerOrder" in $$parsedSource) {
             $$parsedSource["providerOrder"] = $$createField3_0($$parsedSource["providerOrder"]);
+        }
+        if ("trayHidden" in $$parsedSource) {
+            $$parsedSource["trayHidden"] = $$createField6_0($$parsedSource["trayHidden"]);
         }
         return new AppConfig(/** @type {Partial<AppConfig>} */($$parsedSource));
     }

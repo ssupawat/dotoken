@@ -208,6 +208,7 @@ async function toggleSettings() {
       document.getElementById('opencode-api-key').value = cfg.opencodeApiKey || '';
       document.getElementById('show-tray-label').checked = !cfg.hideTrayLabel;
       document.getElementById('rotate-tray-label').checked = !cfg.staticTrayLabel;
+      renderTrayProviders(cfg);
     } catch (err) {
       console.error(err);
     }
@@ -220,13 +221,31 @@ async function toggleSettings() {
   requestAnimationFrame(fitWindow);
 }
 
+// One checkbox per known provider; unchecked ones stay out of the menu bar label
+function renderTrayProviders(cfg) {
+  const hidden = cfg.trayHidden || [];
+  const names = [...new Set([
+    ...(cfg.providerOrder || []),
+    ...((cachedData && cachedData.providers) || []).map(p => p.name),
+    ...hidden,
+  ])];
+  document.getElementById('tray-providers-group').style.display = names.length ? '' : 'none';
+  document.getElementById('tray-providers').innerHTML = names.map(name => `
+    <label class="form-check">
+      <input type="checkbox" data-provider="${name}" ${hidden.includes(name) ? '' : 'checked'}>
+      <span>${name}</span>
+    </label>`).join('');
+}
+
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
   const apiKey = document.getElementById('opencode-api-key').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
   const rotateTrayLabel = document.getElementById('rotate-tray-label').checked;
+  const trayHidden = [...document.querySelectorAll('#tray-providers input:not(:checked)')]
+    .map(el => el.dataset.provider);
   try {
-    const result = await SaveSettings(token, '', apiKey, showTrayLabel, rotateTrayLabel);
+    const result = await SaveSettings(token, '', apiKey, showTrayLabel, rotateTrayLabel, trayHidden);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {

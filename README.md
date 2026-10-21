@@ -32,6 +32,7 @@ Config file: `~/.dotoken.json`
 | `zaiToken` | Z.ai API bearer token |
 | `opencodeApiKey` | OpenCode API key from opencode.ai/auth |
 | `hideTrayLabel` | `true` to hide the usage % next to the menu bar icon |
+| `trayHidden` | Provider names to leave out of the menu bar label, e.g. `["Z.ai"]`; they still show in the popup |
 
 Usage refreshes in the background every 5 minutes. The menu bar shows the highest usage % across all providers (e.g. `73%`), so you can see how close you are to a limit without opening the popup; a `!` means a provider needs you to sign in again.
 

@@ -355,6 +355,7 @@
     -webkit-app-region: no-drag;
   }
   .form-check input { accent-color: #6c8eff; cursor: pointer; }
+  .tray-providers { display: flex; flex-direction: column; gap: 6px; }
 
   .btn-save {
     background: linear-gradient(135deg, #d97757, #6c8eff);
@@ -425,6 +426,10 @@
         <input type="checkbox" id="rotate-tray-label" checked>
         <span>Rotate between providers every 4 seconds</span>
       </label>
+    </div>
+    <div class="form-group" id="tray-providers-group">
+      <span class="form-label">Providers in menu bar</span>
+      <div class="tray-providers" id="tray-providers"></div>
     </div>
     <button class="btn-save" onclick="saveSettings()">Save Settings</button>
   </div>
