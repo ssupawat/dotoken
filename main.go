@@ -71,6 +71,9 @@ type AppConfig struct {
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
 	// StaticTrayLabel turns off the rotation, leaving one provider on screen
 	StaticTrayLabel bool `json:"staticTrayLabel,omitempty"`
+	// TrayHidden lists providers left out of the menu bar label; they still
+	// show in the popup
+	TrayHidden []string `json:"trayHidden,omitempty"`
 }
 
 func getConfigPath() string {
@@ -78,7 +81,7 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, showTrayLabel, rotateTrayLabel bool, trayHidden []string) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
@@ -86,6 +89,7 @@ func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, s
 	cfg.OpencodeApiKey = opencodeApiKey
 	cfg.HideTrayLabel = !showTrayLabel
 	cfg.StaticTrayLabel = !rotateTrayLabel
+	cfg.TrayHidden = trayHidden
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", err
@@ -173,14 +177,15 @@ func publishUsage() {
 	}
 	if tray != nil {
 		cfg := (&DoToken{}).GetSettings()
+		shown := trayProviders(cachedUsage.Providers, cfg.TrayHidden)
 		label := ""
 		switch {
 		case cfg.HideTrayLabel:
 		case cfg.StaticTrayLabel:
-			label = trayLabel(cachedUsage.Providers)
+			label = trayLabel(shown)
 		default:
 			// Rotating labels are advanced by rotateTrayLabel; start at the first
-			if labels := trayLabels(cachedUsage.Providers); len(labels) > 0 {
+			if labels := trayLabels(shown); len(labels) > 0 {
 				label = labels[0]
 			}
 		}
@@ -208,6 +213,24 @@ func windowTier(windowMinutes int) int {
 	default:
 		return 2
 	}
+}
+
+// trayProviders drops the providers the user has hidden from the menu bar.
+func trayProviders(providers []ProviderUsage, hidden []string) []ProviderUsage {
+	if len(hidden) == 0 {
+		return providers
+	}
+	skip := map[string]bool{}
+	for _, name := range hidden {
+		skip[name] = true
+	}
+	shown := make([]ProviderUsage, 0, len(providers))
+	for _, p := range providers {
+		if !skip[p.Name] {
+			shown = append(shown, p)
+		}
+	}
+	return shown
 }
 
 // providerShort is the name shown in the menu bar, where space is tight.
@@ -363,7 +386,7 @@ func rotateTrayLabel() {
 			continue
 		}
 		usageMu.Lock()
-		labels := trayLabels(cachedUsage.Providers)
+		labels := trayLabels(trayProviders(cachedUsage.Providers, cfg.TrayHidden))
 		usageMu.Unlock()
 		if len(labels) == 0 {
 			continue

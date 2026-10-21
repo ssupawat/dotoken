@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTrayLabel(t *testing.T) {
 	tests := []struct {
@@ -193,5 +196,41 @@ func TestParseOpenCodeUsageEmpty(t *testing.T) {
 	}
 	if p := parseOpenCodeUsage([]byte(`not json`)); p != nil {
 		t.Errorf("expected nil for invalid json, got %+v", p)
+	}
+}
+
+func TestTrayProviders(t *testing.T) {
+	providers := []ProviderUsage{
+		{Name: "Claude", Metrics: []Metric{{Pct: 90, WindowMinutes: 300}}},
+		{Name: "OpenCode", Metrics: []Metric{{Pct: 20, WindowMinutes: 300}}},
+		{Name: "Z.ai", Metrics: []Metric{{Pct: 40, WindowMinutes: 300}}},
+	}
+	names := func(ps []ProviderUsage) []string {
+		var out []string
+		for _, p := range ps {
+			out = append(out, p.Name)
+		}
+		return out
+	}
+	tests := []struct {
+		name   string
+		hidden []string
+		want   []string
+	}{
+		{"nothing hidden", nil, []string{"Claude", "OpenCode", "Z.ai"}},
+		{"one hidden", []string{"Claude"}, []string{"OpenCode", "Z.ai"}},
+		{"unknown name ignored", []string{"Codex"}, []string{"Claude", "OpenCode", "Z.ai"}},
+		{"all hidden", []string{"Claude", "OpenCode", "Z.ai"}, nil},
+	}
+	for _, tt := range tests {
+		got := names(trayProviders(providers, tt.hidden))
+		if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+			t.Errorf("%s: trayProviders() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+
+	// Hiding the tightest provider hands the static label to the next one
+	if got, want := trayLabel(trayProviders(providers, []string{"Claude"})), ansiGreen+"Z 60%"+ansiReset; got != want {
+		t.Errorf("trayLabel with Claude hidden = %q, want %q", got, want)
 	}
 }
