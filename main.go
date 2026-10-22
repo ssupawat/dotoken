@@ -67,6 +67,7 @@ type AppConfig struct {
 	ZaiToken       string   `json:"zaiToken"`
 	ClaudeSession  string   `json:"claudeSession"`
 	OpencodeApiKey string   `json:"opencodeApiKey"`
+	KimiApiKey     string   `json:"kimiApiKey,omitempty"`
 	ProviderOrder  []string `json:"providerOrder"`
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
 	// StaticTrayLabel turns off the rotation, leaving one provider on screen
@@ -78,12 +79,13 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey, kimiApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
 	cfg.ClaudeSession = claudeSession
 	cfg.OpencodeApiKey = opencodeApiKey
+	cfg.KimiApiKey = kimiApiKey
 	cfg.HideTrayLabel = !showTrayLabel
 	cfg.StaticTrayLabel = !rotateTrayLabel
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -219,6 +221,8 @@ func providerShort(name string) string {
 		return "OC"
 	case "Z.ai":
 		return "Z"
+	case "Kimi":
+		return "K"
 	default:
 		return name
 	}
@@ -390,6 +394,9 @@ func refreshUsage() {
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
+	}
+	if kimi := fetchKimiUsage(); kimi != nil {
+		providers = append(providers, *kimi)
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
@@ -946,6 +953,213 @@ func fetchZaiUsage() *ProviderUsage {
 		ResetIn:    resetIn,
 		ResetEpoch: resetEpoch,
 	}
+}
+
+// ── Kimi For Coding (Kimi Code usage API) ───────────────────
+
+// kimiCount holds a Kimi counter, which the API sends as a string or a number.
+type kimiCount string
+
+func (c *kimiCount) UnmarshalJSON(b []byte) error {
+	*c = kimiCount(strings.Trim(string(b), `"`))
+	return nil
+}
+
+func (c kimiCount) value() (float64, bool) {
+	v, err := strconv.ParseFloat(string(c), 64)
+	return v, err == nil
+}
+
+type kimiDetail struct {
+	Limit     kimiCount `json:"limit"`
+	Used      kimiCount `json:"used"`
+	Remaining kimiCount `json:"remaining"`
+	ResetTime string    `json:"resetTime"`
+}
+
+// pct turns the request counters into a usage %, preferring used over remaining.
+func (d *kimiDetail) pct() (float64, bool) {
+	if d == nil {
+		return 0, false
+	}
+	limit, ok := d.Limit.value()
+	if !ok || limit <= 0 {
+		return 0, false
+	}
+	if used, ok := d.Used.value(); ok && used >= 0 {
+		return math.Min(used/limit*100, 100), true
+	}
+	if remaining, ok := d.Remaining.value(); ok && remaining >= 0 && remaining <= limit {
+		return (limit - remaining) / limit * 100, true
+	}
+	return 0, false
+}
+
+type kimiPool struct {
+	UsedRatio *float64 `json:"used_ratio"`
+	ResetTime string   `json:"reset_time"`
+}
+
+type kimiUsageResponse struct {
+	// Weekly request counter
+	Usage *kimiDetail `json:"usage"`
+	// Short rate-limit windows; the first is the 5-hour session
+	Limits []struct {
+		Window struct {
+			Duration int    `json:"duration"`
+			TimeUnit string `json:"timeUnit"`
+		} `json:"window"`
+		Detail kimiDetail `json:"detail"`
+	} `json:"limits"`
+	// Newer accounts report ratio pools instead of (or alongside) counters
+	Usages struct {
+		Session *kimiPool `json:"limit_5h"`
+		Weekly  *kimiPool `json:"limit_7d"`
+		Monthly *kimiPool `json:"limit_month_total"`
+	} `json:"usages"`
+}
+
+func kimiWindowMinutes(duration int, unit string) int {
+	units := map[string]int{"TIME_UNIT_MINUTE": 1, "TIME_UNIT_HOUR": 60, "TIME_UNIT_DAY": 1440}
+	if duration <= 0 {
+		return 0
+	}
+	return units[unit] * duration
+}
+
+func parseKimiUsage(body []byte) *ProviderUsage {
+	var result kimiUsageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+
+	type window struct {
+		label   string
+		minutes int
+		pct     float64
+		reset   string
+		ok      bool
+	}
+	// take records a reading for a window, keeping the more exhausted one when
+	// the counters and the ratio pool both report it
+	take := func(w *window, pct float64, reset string) {
+		if !w.ok || pct > w.pct {
+			w.pct, w.reset = pct, reset
+		}
+		w.ok = true
+	}
+	session := window{label: "Session", minutes: 300}
+	weekly := window{label: "Weekly", minutes: 7 * 24 * 60}
+	monthly := window{label: "Monthly", minutes: 30 * 24 * 60}
+
+	if len(result.Limits) > 0 {
+		l := result.Limits[0]
+		if pct, ok := l.Detail.pct(); ok {
+			if m := kimiWindowMinutes(l.Window.Duration, l.Window.TimeUnit); m > 0 {
+				session.minutes = m
+			}
+			take(&session, pct, l.Detail.ResetTime)
+		}
+	}
+	if pct, ok := result.Usage.pct(); ok {
+		take(&weekly, pct, result.Usage.ResetTime)
+	}
+	for _, p := range []struct {
+		w    *window
+		pool *kimiPool
+	}{{&session, result.Usages.Session}, {&weekly, result.Usages.Weekly}, {&monthly, result.Usages.Monthly}} {
+		if p.pool != nil && p.pool.UsedRatio != nil && *p.pool.UsedRatio >= 0 {
+			take(p.w, math.Min(*p.pool.UsedRatio, 1)*100, p.pool.ResetTime)
+		}
+	}
+
+	var metrics []Metric
+	var nearestReset int64
+	for _, w := range []window{session, weekly, monthly} {
+		if !w.ok {
+			continue
+		}
+		metrics = append(metrics, Metric{Label: w.label, Pct: w.pct, WindowMinutes: w.minutes})
+		if t, err := time.Parse(time.RFC3339, w.reset); err == nil {
+			if epoch := t.Unix(); nearestReset == 0 || epoch < nearestReset {
+				nearestReset = epoch
+			}
+		}
+	}
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	var resetStr string
+	if nearestReset > 0 {
+		resetStr = formatResetTime(nearestReset)
+	}
+	return &ProviderUsage{
+		Name:       "Kimi",
+		Metrics:    metrics,
+		ResetIn:    resetStr,
+		ResetEpoch: nearestReset,
+	}
+}
+
+func kimiExpired(msg string) *ProviderUsage {
+	return &ProviderUsage{
+		Name:    "Kimi",
+		Expired: true,
+		Metrics: []Metric{},
+		ResetIn: msg,
+	}
+}
+
+// Kimi Code keys are issued per region; the international host is tried when
+// the China host rejects the key.
+var kimiUsageURLs = []string{
+	"https://api.kimi.com/coding/v1/usages",
+	"https://api.kimi.ai/coding/v1/usages",
+}
+
+func fetchKimiUsage() *ProviderUsage {
+	apiKey := os.Getenv("KIMI_API_KEY")
+	if apiKey == "" {
+		apiKey = (&DoToken{}).GetSettings().KimiApiKey
+	}
+	if apiKey == "" {
+		return nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	status := 0
+	for _, url := range kimiUsageURLs {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("kimi: request failed: %v", err)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		status = resp.StatusCode
+		switch status {
+		case 200:
+			return parseKimiUsage(body)
+		case 401:
+			continue
+		default:
+			log.Printf("kimi: unexpected status %d", status)
+			return nil
+		}
+	}
+	if status == 401 {
+		return kimiExpired("API key rejected — paste a fresh key from the Kimi Code console")
+	}
+	return nil
 }
 
 // ── Helpers ─────────────────────────────────────────────────

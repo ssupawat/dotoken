@@ -195,3 +195,95 @@ func TestParseOpenCodeUsageEmpty(t *testing.T) {
 		t.Errorf("expected nil for invalid json, got %+v", p)
 	}
 }
+
+func TestParseKimiUsageCounters(t *testing.T) {
+	body := []byte(`{
+		"usage": { "limit": "1024", "used": "256", "remaining": "768", "resetTime": "2026-10-27T00:00:00.000Z" },
+		"limits": [
+			{ "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },
+			  "detail": { "limit": 200, "remaining": 50, "resetTime": "2026-10-22T23:00:00.123Z" } }
+		]
+	}`)
+
+	p := parseKimiUsage(body)
+	if p == nil {
+		t.Fatal("expected provider usage, got nil")
+	}
+	if p.Name != "Kimi" {
+		t.Errorf("Name = %q, want Kimi", p.Name)
+	}
+	want := []Metric{
+		{Label: "Session", Pct: 75, WindowMinutes: 300},
+		{Label: "Weekly", Pct: 25, WindowMinutes: 7 * 24 * 60},
+	}
+	if len(p.Metrics) != len(want) {
+		t.Fatalf("got %d metrics, want %d: %+v", len(p.Metrics), len(want), p.Metrics)
+	}
+	for i, w := range want {
+		if p.Metrics[i] != w {
+			t.Errorf("metric[%d] = %+v, want %+v", i, p.Metrics[i], w)
+		}
+	}
+	wantReset := int64(1792710000) // 2026-10-22T23:00:00Z, the session reset
+	if p.ResetEpoch != wantReset {
+		t.Errorf("ResetEpoch = %d, want %d", p.ResetEpoch, wantReset)
+	}
+}
+
+func TestParseKimiUsageRatioPools(t *testing.T) {
+	body := []byte(`{
+		"usage": { "limit": "100", "used": "10", "resetTime": "2026-10-27T00:00:00Z" },
+		"usages": {
+			"limit_5h": { "used_ratio": 0.4, "reset_time": "2026-10-22T23:00:00Z" },
+			"limit_7d": { "used_ratio": 0.05, "reset_time": "2026-10-27T00:00:00Z" },
+			"limit_month_total": { "used_ratio": 1.3, "reset_time": "2026-11-01T00:00:00Z" }
+		}
+	}`)
+
+	p := parseKimiUsage(body)
+	if p == nil {
+		t.Fatal("expected provider usage, got nil")
+	}
+	want := []Metric{
+		{Label: "Session", Pct: 40, WindowMinutes: 300},
+		// The weekly counter reports more usage than the ratio pool, so it wins
+		{Label: "Weekly", Pct: 10, WindowMinutes: 7 * 24 * 60},
+		// Ratios over 1 are capped at 100%
+		{Label: "Monthly", Pct: 100, WindowMinutes: 30 * 24 * 60},
+	}
+	if len(p.Metrics) != len(want) {
+		t.Fatalf("got %d metrics, want %d: %+v", len(p.Metrics), len(want), p.Metrics)
+	}
+	for i, w := range want {
+		if p.Metrics[i] != w {
+			t.Errorf("metric[%d] = %+v, want %+v", i, p.Metrics[i], w)
+		}
+	}
+}
+
+func TestParseKimiUsageEmpty(t *testing.T) {
+	for _, body := range []string{`{}`, `not json`, `{"usage": {"limit": "0", "used": "0"}}`} {
+		if p := parseKimiUsage([]byte(body)); p != nil {
+			t.Errorf("parseKimiUsage(%s) = %+v, want nil", body, p)
+		}
+	}
+}
+
+func TestKimiWindowMinutes(t *testing.T) {
+	tests := []struct {
+		duration int
+		unit     string
+		want     int
+	}{
+		{300, "TIME_UNIT_MINUTE", 300},
+		{5, "TIME_UNIT_HOUR", 300},
+		{7, "TIME_UNIT_DAY", 7 * 24 * 60},
+		{1, "TIME_UNIT_UNKNOWN", 0},
+		{0, "TIME_UNIT_MINUTE", 0},
+	}
+	for _, tt := range tests {
+		if got := kimiWindowMinutes(tt.duration, tt.unit); got != tt.want {
+			t.Errorf("kimiWindowMinutes(%d, %q) = %d, want %d", tt.duration, tt.unit, got, tt.want)
+		}
+	}
+}

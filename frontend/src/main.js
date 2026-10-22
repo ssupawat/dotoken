@@ -24,6 +24,7 @@ function providerClass(name) {
   if (n.includes('opencode')) return 'opencode';
   if (n.includes('openai')) return 'openai';
   if (n.includes('z.ai')) return 'zai';
+  if (n.includes('kimi')) return 'kimi';
   return '';
 }
 
@@ -206,6 +207,7 @@ async function toggleSettings() {
       const cfg = await GetSettings();
       document.getElementById('zai-token').value = cfg.zaiToken || '';
       document.getElementById('opencode-api-key').value = cfg.opencodeApiKey || '';
+      document.getElementById('kimi-api-key').value = cfg.kimiApiKey || '';
       document.getElementById('show-tray-label').checked = !cfg.hideTrayLabel;
       document.getElementById('rotate-tray-label').checked = !cfg.staticTrayLabel;
     } catch (err) {
@@ -223,10 +225,11 @@ async function toggleSettings() {
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
   const apiKey = document.getElementById('opencode-api-key').value.trim();
+  const kimiKey = document.getElementById('kimi-api-key').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
   const rotateTrayLabel = document.getElementById('rotate-tray-label').checked;
   try {
-    const result = await SaveSettings(token, '', apiKey, showTrayLabel, rotateTrayLabel);
+    const result = await SaveSettings(token, '', apiKey, kimiKey, showTrayLabel, rotateTrayLabel);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {
