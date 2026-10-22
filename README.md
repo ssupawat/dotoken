@@ -7,6 +7,7 @@ A simple macOS menu bar app to monitor AI usage limits in real-time.
 - **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain.
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
 - **Z.ai** — queries & token limits via API
+- **Kimi For Coding** — 5-hour session, weekly, and monthly limits via the Kimi Code usage API
 
 ## Install
 
@@ -22,6 +23,7 @@ curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | ba
 
 - **Claude**: [Claude Code](https://code.claude.com/) installed and signed in (`claude /login`). The app reads the OAuth token from your Keychain and refreshes it when needed.
 - **OpenCode**: a paid Go plan. Paste the full `Cookie` request header from opencode.ai (must include both `auth=` and `__Host-console_session=`).
+- **Kimi**: a Kimi For Coding membership. Create an API key in the Kimi Code console (the same key Kimi CLI or Claude Code uses with `api.kimi.com/coding`) and paste it in settings, or set `KIMI_API_KEY`. Keys from either kimi.com or kimi.ai work.
 
 ## Settings
 
@@ -31,6 +33,7 @@ Config file: `~/.dotoken.json`
 |-------|-------------|
 | `zaiToken` | Z.ai API bearer token |
 | `opencodeApiKey` | OpenCode API key from opencode.ai/auth |
+| `kimiApiKey` | Kimi Code API key from the Kimi Code console |
 | `hideTrayLabel` | `true` to hide the usage % next to the menu bar icon |
 
 Usage refreshes in the background every 5 minutes. The menu bar shows the highest usage % across all providers (e.g. `73%`), so you can see how close you are to a limit without opening the popup; a `!` means a provider needs you to sign in again.

@@ -19,11 +19,13 @@
     --openai:    #10a37f;
     --opencode:  #f59e0b;
     --zai:       #6c8eff;
+    --kimi:      #a78bfa;
     --warn:      #f87171;
     --glow-c:    #d9775730;
     --glow-o:    #10a37f28;
     --glow-oc:   #f59e0b30;
     --glow-z:    #6c8eff28;
+    --glow-k:    #a78bfa28;
   }
 
   body {
@@ -223,6 +225,7 @@
   .opencode  .bar-fill { background: var(--opencode); box-shadow: 0 0 6px var(--glow-oc); }
   .openai    .bar-fill { background: var(--openai);   box-shadow: 0 0 6px var(--glow-o); }
   .zai       .bar-fill { background: var(--zai);      box-shadow: 0 0 6px var(--glow-z); }
+  .kimi      .bar-fill { background: var(--kimi);     box-shadow: 0 0 6px var(--glow-k); }
 
   .row-pct {
     font-family: 'DM Mono', monospace;
@@ -235,6 +238,7 @@
   .opencode  .row-pct { color: var(--opencode); }
   .openai    .row-pct { color: var(--openai); }
   .zai       .row-pct { color: var(--zai);    }
+  .kimi      .row-pct { color: var(--kimi);   }
 
   /* warn state */
   .warn .bar-fill { background: #f59e0b; box-shadow: 0 0 6px #f59e0b30; }
@@ -413,6 +417,10 @@
     <div class="form-group">
       <label class="form-label" for="opencode-api-key">OpenCode API Key</label>
       <input type="password" class="form-input" id="opencode-api-key" placeholder="Paste API key from opencode.ai/auth">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="kimi-api-key">Kimi Code API Key</label>
+      <input type="password" class="form-input" id="kimi-api-key" placeholder="Paste API key from the Kimi Code console">
     </div>
     <div class="form-group">
       <label class="form-check" for="show-tray-label">

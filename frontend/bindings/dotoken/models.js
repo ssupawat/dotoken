@@ -72,6 +72,13 @@ export class AppConfig {
              */
             this["opencodeApiKey"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["kimiApiKey"] = undefined;
+        }
         if (!("providerOrder" in $$source)) {
             /**
              * @member
