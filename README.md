@@ -7,6 +7,7 @@ A simple macOS menu bar app to monitor AI usage limits in real-time.
 - **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain.
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
 - **Z.ai** — queries & token limits via API
+- **Gemini CLI** — daily request quota per model via Google's Code Assist API. Reads the sign-in Gemini CLI stores in `~/.gemini`, no setup needed.
 
 ## Install
 
@@ -21,6 +22,7 @@ curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | ba
 ## Requirements
 
 - **Claude**: [Claude Code](https://code.claude.com/) installed and signed in (`claude /login`). The app reads the OAuth token from your Keychain and refreshes it when needed.
+- **Gemini**: [Gemini CLI](https://github.com/google-gemini/gemini-cli) signed in with **Login with Google** (`gemini`). API key and Vertex AI sign-ins have no quota to show, so the card stays hidden.
 - **OpenCode**: a paid Go plan. Paste the full `Cookie` request header from opencode.ai (must include both `auth=` and `__Host-console_session=`).
 
 ## Settings
