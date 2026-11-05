@@ -219,6 +219,8 @@ func providerShort(name string) string {
 		return "OC"
 	case "Z.ai":
 		return "Z"
+	case "Gemini":
+		return "G"
 	default:
 		return name
 	}
@@ -390,6 +392,9 @@ func refreshUsage() {
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
+	}
+	if gemini := fetchGeminiUsage(); gemini != nil {
+		providers = append(providers, *gemini)
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
