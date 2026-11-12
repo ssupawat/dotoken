@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestTrayLabel(t *testing.T) {
 	tests := []struct {
@@ -193,5 +198,102 @@ func TestParseOpenCodeUsageEmpty(t *testing.T) {
 	}
 	if p := parseOpenCodeUsage([]byte(`not json`)); p != nil {
 		t.Errorf("expected nil for invalid json, got %+v", p)
+	}
+}
+
+func TestClaudeKeychainQueries(t *testing.T) {
+	service := "Claude Code-credentials"
+	tests := []struct {
+		name     string
+		username string
+		want     [][]string
+	}{
+		{
+			"username item first, service-only fallback",
+			"art",
+			[][]string{
+				{"find-generic-password", "-s", service, "-a", "art"},
+				{"find-generic-password", "-s", service},
+			},
+		},
+		{
+			"no username means service-only",
+			"",
+			[][]string{
+				{"find-generic-password", "-s", service},
+			},
+		},
+	}
+	for _, tt := range tests {
+		got := claudeKeychainQueries(tt.username)
+		if len(got) != len(tt.want) {
+			t.Errorf("%s: got %d queries, want %d: %q", tt.name, len(got), len(tt.want), got)
+			continue
+		}
+		for i := range got {
+			if strings.Join(got[i], " ") != strings.Join(tt.want[i], " ") {
+				t.Errorf("%s: query %d = %q, want %q", tt.name, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestParseClaudeOauth(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want *claudeOauthCreds
+	}{
+		{
+			"valid payload",
+			`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"sk-ant-ort01-y","expiresAt":123}}`,
+			&claudeOauthCreds{AccessToken: "sk-ant-oat01-x", RefreshToken: "sk-ant-ort01-y", ExpiresAt: 123},
+		},
+		{"missing access token", `{"claudeAiOauth":{"refreshToken":"y"}}`, nil},
+		{"no oauth object", `{"other":1}`, nil},
+		{"malformed json", `{`, nil},
+	}
+	for _, tt := range tests {
+		got := parseClaudeOauth([]byte(tt.data))
+		if tt.want == nil || got == nil {
+			if (tt.want == nil) != (got == nil) {
+				t.Errorf("%s: parseClaudeOauth() = %v, want %v", tt.name, got, tt.want)
+			}
+			continue
+		}
+		if *got != *tt.want {
+			t.Errorf("%s: parseClaudeOauth() = %+v, want %+v", tt.name, *got, *tt.want)
+		}
+	}
+}
+
+func TestMergeClaudeCreds(t *testing.T) {
+	raw := []byte(`{"claudeAiOauth":{"accessToken":"old-at","refreshToken":"old-rt","expiresAt":1,"scopes":["user:inference"],"subscriptionType":"pro","rateLimitTier":"default_claude_ai"},"extra":"keep-me"}`)
+	fresh := &claudeOauthCreds{AccessToken: "new-at", RefreshToken: "new-rt", ExpiresAt: 2}
+	merged, err := mergeClaudeCreds(raw, fresh)
+	if err != nil {
+		t.Fatalf("mergeClaudeCreds() error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("merged output is not json: %v", err)
+	}
+	if got["extra"] != "keep-me" {
+		t.Errorf("top-level key lost: extra = %v", got["extra"])
+	}
+	oauth, _ := got["claudeAiOauth"].(map[string]any)
+	if oauth == nil {
+		t.Fatalf("claudeAiOauth missing in merged output: %s", merged)
+	}
+	for k, want := range map[string]any{
+		"accessToken": "new-at", "refreshToken": "new-rt", "expiresAt": float64(2),
+		"scopes": []any{"user:inference"}, "subscriptionType": "pro", "rateLimitTier": "default_claude_ai",
+	} {
+		if !reflect.DeepEqual(oauth[k], want) {
+			t.Errorf("claudeAiOauth[%q] = %v, want %v", k, oauth[k], want)
+		}
+	}
+	if _, err := mergeClaudeCreds([]byte(`{`), fresh); err == nil {
+		t.Error("mergeClaudeCreds() should error on malformed input")
 	}
 }

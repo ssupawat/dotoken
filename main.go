@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -487,6 +488,70 @@ func (t *DoToken) ResizePopup(height float64) {
 // ── Claude (OAuth usage API) ──────────────────────────────
 
 const claudeOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+const claudeKeychainService = "Claude Code-credentials"
+
+var keychainAcctRe = regexp.MustCompile(`"acct"<blob>="([^"]+)"`)
+
+// claudeKeychainQueries lists keychain lookups in preference order. Claude
+// Code keys its item by local username; older versions left items under the
+// OAuth account name, so a service-only query is kept as a fallback.
+func claudeKeychainQueries(username string) [][]string {
+	queries := [][]string{}
+	if username != "" {
+		queries = append(queries, []string{"find-generic-password", "-s", claudeKeychainService, "-a", username})
+	}
+	return append(queries, []string{"find-generic-password", "-s", claudeKeychainService})
+}
+
+func parseClaudeOauth(data []byte) *claudeOauthCreds {
+	var parsed struct {
+		ClaudeAiOauth claudeOauthCreds `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(data, &parsed) != nil || parsed.ClaudeAiOauth.AccessToken == "" {
+		return nil
+	}
+	return &parsed.ClaudeAiOauth
+}
+
+// mergeClaudeCreds updates the OAuth fields inside claudeAiOauth while
+// keeping every other key (scopes, subscription type, top-level extras).
+func mergeClaudeCreds(raw []byte, n *claudeOauthCreds) ([]byte, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, err
+	}
+	oauth := map[string]json.RawMessage{}
+	if existing, ok := top["claudeAiOauth"]; ok {
+		if err := json.Unmarshal(existing, &oauth); err != nil {
+			return nil, err
+		}
+	}
+	update, err := json.Marshal(n)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(update, &oauth); err != nil {
+		return nil, err
+	}
+	merged, err := json.Marshal(oauth)
+	if err != nil {
+		return nil, err
+	}
+	top["claudeAiOauth"] = merged
+	return json.Marshal(top)
+}
+
+func keychainAcct(args []string) string {
+	meta, err := exec.Command("security", args...).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	m := keychainAcctRe.FindSubmatch(meta)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
+}
 
 type claudeOauthCreds struct {
 	AccessToken  string `json:"accessToken"`
@@ -495,16 +560,24 @@ type claudeOauthCreds struct {
 }
 
 func readClaudeOauth() (*claudeOauthCreds, func(*claudeOauthCreds) error) {
-	// macOS Keychain — Claude Code's default store
-	if out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w").Output(); err == nil {
-		var parsed struct {
-			ClaudeAiOauth claudeOauthCreds `json:"claudeAiOauth"`
+	// macOS Keychain — Claude Code's default store, newest item first
+	username := ""
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+	for _, query := range claudeKeychainQueries(username) {
+		out, err := exec.Command("security", append(append([]string{}, query...), "-w")...).Output()
+		if err != nil {
+			continue
 		}
-		if json.Unmarshal(out, &parsed) == nil && parsed.ClaudeAiOauth.AccessToken != "" {
-			raw := out
-			persist := func(n *claudeOauthCreds) error { return writeClaudeKeychain(raw, n) }
-			return &parsed.ClaudeAiOauth, persist
+		creds := parseClaudeOauth(out)
+		if creds == nil {
+			continue
 		}
+		acct := keychainAcct(query)
+		raw := out
+		persist := func(n *claudeOauthCreds) error { return writeClaudeKeychain(acct, raw, n) }
+		return creds, persist
 	}
 
 	// File fallback (older CLI versions / headless logins)
@@ -529,48 +602,23 @@ func readClaudeOauth() (*claudeOauthCreds, func(*claudeOauthCreds) error) {
 	return nil, nil
 }
 
-// writeClaudeKeychain rewrites the Keychain item with refreshed OAuth fields,
-// preserving every other top-level key Claude Code keeps there.
-func writeClaudeKeychain(raw []byte, n *claudeOauthCreds) error {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
-		return err
-	}
-	updated, err := json.Marshal(n)
-	if err != nil {
-		return err
-	}
-	top["claudeAiOauth"] = updated
-	full, err := json.Marshal(top)
-	if err != nil {
-		return err
-	}
-
-	meta, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials").CombinedOutput()
-	if err != nil {
-		return err
-	}
-	reAcct := regexp.MustCompile(`"acct"<blob>="([^"]+)"`)
-	m := reAcct.FindSubmatch(meta)
-	if m == nil {
+// writeClaudeKeychain rewrites the Keychain item that matched acct with
+// refreshed OAuth fields, preserving every other key Claude Code keeps there.
+func writeClaudeKeychain(acct string, raw []byte, n *claudeOauthCreds) error {
+	if acct == "" {
 		return fmt.Errorf("keychain account not found")
 	}
-	cmd := exec.Command("security", "add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", string(m[1]), "-w", string(full))
+	full, err := mergeClaudeCreds(raw, n)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("security", "add-generic-password", "-U", "-s", claudeKeychainService, "-a", acct, "-w", string(full))
 	return cmd.Run()
 }
 
 // writeClaudeFile rewrites the credentials file with refreshed OAuth fields.
 func writeClaudeFile(path string, raw []byte, n *claudeOauthCreds) error {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
-		return err
-	}
-	updated, err := json.Marshal(n)
-	if err != nil {
-		return err
-	}
-	top["claudeAiOauth"] = updated
-	full, err := json.Marshal(top)
+	full, err := mergeClaudeCreds(raw, n)
 	if err != nil {
 		return err
 	}
