@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTrayLabel(t *testing.T) {
@@ -295,5 +296,80 @@ func TestMergeClaudeCreds(t *testing.T) {
 	}
 	if _, err := mergeClaudeCreds([]byte(`{`), fresh); err == nil {
 		t.Error("mergeClaudeCreds() should error on malformed input")
+	}
+}
+
+func TestOpenRouterNextReset(t *testing.T) {
+	// Wednesday 12 Nov 2025, 15:30 UTC
+	now := time.Date(2025, 11, 12, 15, 30, 0, 0, time.UTC)
+	tests := []struct {
+		period string
+		want   time.Time
+		window int
+	}{
+		{"daily", time.Date(2025, 11, 13, 0, 0, 0, 0, time.UTC), 1440},
+		{"weekly", time.Date(2025, 11, 17, 0, 0, 0, 0, time.UTC), 10080},
+		{"monthly", time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), 43200},
+		{"", time.Time{}, 0},
+	}
+	for _, tt := range tests {
+		got, window := openrouterNextReset(tt.period, now)
+		if !got.Equal(tt.want) || window != tt.window {
+			t.Errorf("%q: got %v/%d, want %v/%d", tt.period, got, window, tt.want, tt.window)
+		}
+	}
+	// On a Monday the weekly reset is a week away, not now
+	monday := time.Date(2025, 11, 17, 9, 0, 0, 0, time.UTC)
+	if got, _ := openrouterNextReset("weekly", monday); !got.Equal(time.Date(2025, 11, 24, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("weekly on Monday = %v", got)
+	}
+	// December rolls into January
+	dec := time.Date(2025, 12, 20, 0, 0, 0, 0, time.UTC)
+	if got, _ := openrouterNextReset("monthly", dec); !got.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("monthly in December = %v", got)
+	}
+}
+
+func TestParseOpenRouterUsage(t *testing.T) {
+	now := time.Date(2025, 11, 12, 15, 30, 0, 0, time.UTC)
+
+	capped := parseOpenRouterUsage([]byte(`{"data":{"label":"k","limit":20,"limit_remaining":5,"limit_reset":"weekly","usage":120,"usage_daily":1.234,"usage_weekly":15,"usage_monthly":42.5}}`), now)
+	if capped == nil || len(capped.Metrics) != 3 {
+		t.Fatalf("capped key: got %+v", capped)
+	}
+	limit := capped.Metrics[0]
+	if limit.Label != "Weekly" || limit.Pct != 75 || limit.WindowMinutes != 10080 || limit.Info {
+		t.Errorf("capped limit metric = %+v", limit)
+	}
+	if capped.Metrics[1].Display != "$1.23" || !capped.Metrics[1].Info {
+		t.Errorf("today metric = %+v", capped.Metrics[1])
+	}
+	if capped.Metrics[2].Display != "$42.50" {
+		t.Errorf("month metric = %+v", capped.Metrics[2])
+	}
+	if capped.ResetEpoch != time.Date(2025, 11, 17, 0, 0, 0, 0, time.UTC).Unix() {
+		t.Errorf("reset epoch = %d", capped.ResetEpoch)
+	}
+	if got := trayLabel([]ProviderUsage{*capped}); got != ansiYellow+"OR 25%"+ansiReset {
+		t.Errorf("capped trayLabel = %q", got)
+	}
+
+	// No cap: spend only, and nothing for the menu bar to rank
+	open := parseOpenRouterUsage([]byte(`{"data":{"limit":null,"limit_remaining":null,"limit_reset":null,"usage":3,"usage_daily":0,"usage_monthly":3}}`), now)
+	if open == nil || len(open.Metrics) != 2 || open.ResetIn != "" {
+		t.Fatalf("uncapped key: got %+v", open)
+	}
+	if got := trayLabel([]ProviderUsage{*open}); got != "" {
+		t.Errorf("uncapped trayLabel = %q, want empty", got)
+	}
+
+	// Lifetime cap with no reset falls back to a plain Credit bar
+	lifetime := parseOpenRouterUsage([]byte(`{"data":{"limit":10,"limit_remaining":-2,"usage":12}}`), now)
+	if lifetime.Metrics[0].Label != "Credit" || lifetime.Metrics[0].Pct != 100 || lifetime.ResetEpoch != 0 {
+		t.Errorf("lifetime limit metric = %+v", lifetime.Metrics[0])
+	}
+
+	if parseOpenRouterUsage([]byte(`not json`), now) != nil {
+		t.Error("malformed body should return nil")
 	}
 }

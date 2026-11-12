@@ -24,10 +24,21 @@ function providerClass(name) {
   if (n.includes('opencode')) return 'opencode';
   if (n.includes('openai')) return 'openai';
   if (n.includes('z.ai')) return 'zai';
+  if (n.includes('openrouter')) return 'openrouter';
   return '';
 }
 
 function renderMetric(m, providerClass) {
+  // Figure with no limit behind it (e.g. spend): value only, no bar
+  if (m.info) {
+    return `
+      <div class="row ${providerClass}">
+        <span class="row-label">${m.label}</span>
+        <div class="bar-track"></div>
+        <span class="row-pct" style="color:var(--dim);font-size:9px">${m.display || formatNumber(m.used)}</span>
+      </div>`;
+  }
+
   // Loading state (pct === -1)
   if (m.pct === -1) {
     return `
@@ -206,6 +217,7 @@ async function toggleSettings() {
       const cfg = await GetSettings();
       document.getElementById('zai-token').value = cfg.zaiToken || '';
       document.getElementById('opencode-api-key').value = cfg.opencodeApiKey || '';
+      document.getElementById('openrouter-api-key').value = cfg.openrouterApiKey || '';
       document.getElementById('show-tray-label').checked = !cfg.hideTrayLabel;
       document.getElementById('rotate-tray-label').checked = !cfg.staticTrayLabel;
     } catch (err) {
@@ -223,10 +235,11 @@ async function toggleSettings() {
 async function saveSettings() {
   const token = document.getElementById('zai-token').value.trim();
   const apiKey = document.getElementById('opencode-api-key').value.trim();
+  const openrouterKey = document.getElementById('openrouter-api-key').value.trim();
   const showTrayLabel = document.getElementById('show-tray-label').checked;
   const rotateTrayLabel = document.getElementById('rotate-tray-label').checked;
   try {
-    const result = await SaveSettings(token, '', apiKey, showTrayLabel, rotateTrayLabel);
+    const result = await SaveSettings(token, '', apiKey, openrouterKey, showTrayLabel, rotateTrayLabel);
     // result is the warning string from Go (string, error)
     const warning = result || '';
     if (warning) {

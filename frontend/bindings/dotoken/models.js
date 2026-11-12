@@ -94,6 +94,14 @@ export class AppConfig {
              */
             this["staticTrayLabel"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * OpenRouterApiKey is any OpenRouter API key; its credit limit and spend are shown
+             * @member
+             * @type {string | undefined}
+             */
+            this["openrouterApiKey"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -154,6 +162,23 @@ export class Metric {
              * @type {number | undefined}
              */
             this["windowMinutes"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Display, when set, is shown in place of the percentage (e.g. "$4.12")
+             * @member
+             * @type {string | undefined}
+             */
+            this["display"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Info marks a figure with no limit behind it, such as spend on a key
+             * with no cap; the menu bar ignores it
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["info"] = undefined;
         }
 
         Object.assign(this, $$source);

@@ -47,6 +47,11 @@ type Metric struct {
 	Pct   float64 `json:"pct"`
 	// WindowMinutes is the length of the limit's window; 0 when unknown
 	WindowMinutes int `json:"windowMinutes,omitempty"`
+	// Display, when set, is shown in place of the percentage (e.g. "$4.12")
+	Display string `json:"display,omitempty"`
+	// Info marks a figure with no limit behind it, such as spend on a key
+	// with no cap; the menu bar ignores it
+	Info bool `json:"info,omitempty"`
 }
 
 type AllUsage struct {
@@ -72,6 +77,8 @@ type AppConfig struct {
 	HideTrayLabel  bool     `json:"hideTrayLabel"`
 	// StaticTrayLabel turns off the rotation, leaving one provider on screen
 	StaticTrayLabel bool `json:"staticTrayLabel,omitempty"`
+	// OpenRouterApiKey is any OpenRouter API key; its credit limit and spend are shown
+	OpenRouterApiKey string `json:"openrouterApiKey,omitempty"`
 }
 
 func getConfigPath() string {
@@ -79,12 +86,13 @@ func getConfigPath() string {
 	return filepath.Join(home, ".dotoken.json")
 }
 
-func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
+func (t *DoToken) SaveSettings(zaiToken, claudeSession, opencodeApiKey, openrouterApiKey string, showTrayLabel, rotateTrayLabel bool) (string, error) {
 	// Start from the saved config so fields not on the form (provider order) survive
 	cfg := t.GetSettings()
 	cfg.ZaiToken = zaiToken
 	cfg.ClaudeSession = claudeSession
 	cfg.OpencodeApiKey = opencodeApiKey
+	cfg.OpenRouterApiKey = openrouterApiKey
 	cfg.HideTrayLabel = !showTrayLabel
 	cfg.StaticTrayLabel = !rotateTrayLabel
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -220,6 +228,8 @@ func providerShort(name string) string {
 		return "OC"
 	case "Z.ai":
 		return "Z"
+	case "OpenRouter":
+		return "OR"
 	default:
 		return name
 	}
@@ -242,7 +252,7 @@ func remainingColour(remaining int) string {
 func tightestUsed(p ProviderUsage) (float64, int, bool) {
 	best := [3]float64{-1, -1, -1}
 	for _, m := range p.Metrics {
-		if m.Pct < 0 {
+		if m.Pct < 0 || m.Info {
 			continue
 		}
 		tier := windowTier(m.WindowMinutes)
@@ -391,6 +401,9 @@ func refreshUsage() {
 	}
 	if zai := fetchZaiUsage(); zai != nil {
 		providers = append(providers, *zai)
+	}
+	if or := fetchOpenRouterUsage(); or != nil {
+		providers = append(providers, *or)
 	}
 
 	// Claude: use cached data if available, otherwise show loading placeholder
@@ -993,6 +1006,153 @@ func fetchZaiUsage() *ProviderUsage {
 		Metrics:    metrics,
 		ResetIn:    resetIn,
 		ResetEpoch: resetEpoch,
+	}
+}
+
+// ── OpenRouter (API key) ────────────────────────────────────
+
+type openrouterKeyResponse struct {
+	Data struct {
+		Label          string   `json:"label"`
+		Limit          *float64 `json:"limit"`
+		LimitRemaining *float64 `json:"limit_remaining"`
+		LimitReset     *string  `json:"limit_reset"`
+		Usage          float64  `json:"usage"`
+		UsageDaily     float64  `json:"usage_daily"`
+		UsageWeekly    float64  `json:"usage_weekly"`
+		UsageMonthly   float64  `json:"usage_monthly"`
+	} `json:"data"`
+}
+
+func openrouterExpired(msg string) *ProviderUsage {
+	return &ProviderUsage{
+		Name:    "OpenRouter",
+		Metrics: []Metric{},
+		ResetIn: msg,
+		Expired: true,
+	}
+}
+
+// openrouterNextReset returns when a key's credit limit next resets. OpenRouter
+// resets limits at midnight UTC: daily every day, weekly on Monday, monthly on
+// the 1st. It returns the zero time when the limit never resets.
+func openrouterNextReset(period string, now time.Time) (time.Time, int) {
+	now = now.UTC()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	switch period {
+	case "daily":
+		return midnight.AddDate(0, 0, 1), 24 * 60
+	case "weekly":
+		days := (8 - int(now.Weekday())) % 7
+		if days == 0 {
+			days = 7
+		}
+		return midnight.AddDate(0, 0, days), 7 * 24 * 60
+	case "monthly":
+		return time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC), 30 * 24 * 60
+	}
+	return time.Time{}, 0
+}
+
+func formatDollars(v float64) string {
+	if v >= 1000 {
+		return fmt.Sprintf("$%.0f", v)
+	}
+	return fmt.Sprintf("$%.2f", v)
+}
+
+func parseOpenRouterUsage(body []byte, now time.Time) *ProviderUsage {
+	var r openrouterKeyResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		log.Printf("openrouter: decode failed: %v", err)
+		return nil
+	}
+	d := r.Data
+	period := ""
+	if d.LimitReset != nil {
+		period = *d.LimitReset
+	}
+
+	var metrics []Metric
+	var resetEpoch int64
+	if d.Limit != nil && *d.Limit > 0 {
+		limit := *d.Limit
+		// limit_remaining already accounts for the reset period; fall back to
+		// lifetime usage when it is missing
+		used := d.Usage
+		if d.LimitRemaining != nil {
+			used = limit - *d.LimitRemaining
+		}
+		if used < 0 {
+			used = 0
+		}
+		label := "Credit"
+		switch period {
+		case "daily":
+			label = "Daily"
+		case "weekly":
+			label = "Weekly"
+		case "monthly":
+			label = "Monthly"
+		}
+		reset, window := openrouterNextReset(period, now)
+		if !reset.IsZero() {
+			resetEpoch = reset.Unix()
+		}
+		metrics = append(metrics, Metric{
+			Label:         label,
+			Used:          used,
+			Max:           limit,
+			Pct:           math.Min(used/limit*100, 100),
+			WindowMinutes: window,
+		})
+	}
+
+	// Spend figures, shown whether or not the key has a cap
+	metrics = append(metrics,
+		Metric{Label: "Today", Used: d.UsageDaily, Display: formatDollars(d.UsageDaily), Info: true},
+		Metric{Label: "Month", Used: d.UsageMonthly, Display: formatDollars(d.UsageMonthly), Info: true},
+	)
+
+	p := &ProviderUsage{Name: "OpenRouter", Metrics: metrics, ResetEpoch: resetEpoch}
+	if resetEpoch > 0 {
+		p.ResetIn = formatResetTime(resetEpoch)
+	}
+	return p
+}
+
+func fetchOpenRouterUsage() *ProviderUsage {
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
+		apiKey = (&DoToken{}).GetSettings().OpenRouterApiKey
+	}
+	if apiKey == "" {
+		return nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", "https://openrouter.ai/api/v1/key", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("openrouter: request failed: %v", err)
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	switch resp.StatusCode {
+	case 200:
+		return parseOpenRouterUsage(body, time.Now())
+	case 401, 403:
+		return openrouterExpired("API key rejected — create a new key at openrouter.ai/settings/keys")
+	default:
+		log.Printf("openrouter: unexpected status %d", resp.StatusCode)
+		return nil
 	}
 }
 
