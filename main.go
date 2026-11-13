@@ -27,6 +27,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed VERSION
+var versionRaw []byte
+
+// appVersion is the build's version, from the VERSION file at the repo root.
+var appVersion = strings.TrimSpace(string(versionRaw))
+
 //go:embed assets/trayicon.png
 var iconData []byte
 
@@ -472,6 +478,11 @@ func (t *DoToken) FetchUsage() AllUsage {
 
 // StartPolling is kept for compatibility but does nothing
 func (t *DoToken) StartPolling() {}
+
+// GetVersion returns the build's version from the VERSION file.
+func (t *DoToken) GetVersion() string {
+	return appVersion
+}
 
 func (t *DoToken) ResizePopup(height float64) {
 	if appWindow == nil {

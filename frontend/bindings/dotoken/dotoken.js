@@ -38,6 +38,14 @@ export function GetSettings() {
 }
 
 /**
+ * GetVersion returns the build's version from the VERSION file.
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetVersion() {
+    return $Call.ByID(1725081454);
+}
+
+/**
  * @returns {$CancellablePromise<void>}
  */
 export function QuitApp() {

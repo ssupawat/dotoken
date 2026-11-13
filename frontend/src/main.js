@@ -1,4 +1,4 @@
-import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder, ResizePopup, GetLaunchAtLogin, SetLaunchAtLogin } from '../bindings/dotoken/dotoken.js'
+import { FetchUsage, SaveSettings, GetSettings, QuitApp, SaveProviderOrder, ResizePopup, GetLaunchAtLogin, SetLaunchAtLogin, GetVersion } from '../bindings/dotoken/dotoken.js'
 import { Events } from '@wailsio/runtime'
 
 function fitWindow() {
@@ -337,4 +337,8 @@ window.addEventListener('focus', () => {
 
 // Initial load (returns cache, refresh in background)
 refresh();
+
+GetVersion().then(v => {
+  document.getElementById('version-tag').textContent = 'v' + v;
+}).catch(() => {});
 

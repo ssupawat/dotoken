@@ -298,6 +298,14 @@
   .footer-btn:hover { color: var(--text); }
   .footer-btn.danger:hover { color: #ef4444; }
 
+  .version-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.06em;
+    user-select: text;
+  }
+
   /* ── Loading & Settings ── */
   .loading, .settings-view {
     padding: 40px 18px;
@@ -447,6 +455,8 @@
   <!-- Footer -->
   <div class="footer">
     <button class="footer-btn" id="settings-btn" onclick="toggleSettings()">settings</button>
+    <span style="flex:1"></span>
+    <span class="version-tag" id="version-tag"></span>
     <span style="flex:1"></span>
     <button class="footer-btn danger" onclick="quit()">quit</button>
   </div>
