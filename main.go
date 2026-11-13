@@ -950,13 +950,8 @@ func zaiWindowMinutes(limit zaiLimit) int {
 	return unit * limit.Number
 }
 
-// zaiHosts serve the same quota API: z.ai for international keys and
-// open.bigmodel.cn for keys from the China console.
-var zaiHosts = []string{"https://api.z.ai", "https://open.bigmodel.cn"}
-
-// zaiHost is the index of the host that last accepted the key, so each poll
-// asks it first instead of paying for a rejection on the other one.
-var zaiHost atomic.Int32
+// zaiURL is the quota API endpoint; a var so tests can point it at a fake server.
+var zaiURL = "https://api.z.ai/api/monitor/usage/quota/limit"
 
 func zaiExpired(msg string) *ProviderUsage {
 	return &ProviderUsage{
@@ -1044,35 +1039,28 @@ func fetchZaiUsage() *ProviderUsage {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	first := int(zaiHost.Load()) % len(zaiHosts)
-	for i := range zaiHosts {
-		idx := (first + i) % len(zaiHosts)
-		req, err := http.NewRequest("GET", zaiHosts[idx]+"/api/monitor/usage/quota/limit", nil)
-		if err != nil {
-			return nil
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("z.ai: request failed: %v", err)
-			return nil
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if zaiRejected(resp.StatusCode, body) {
-			// The key may belong to the other region's console
-			continue
-		}
-		if resp.StatusCode != 200 {
-			log.Printf("z.ai: unexpected status %d", resp.StatusCode)
-			return nil
-		}
-		zaiHost.Store(int32(idx))
-		return parseZaiUsage(body)
+	req, err := http.NewRequest("GET", zaiURL, nil)
+	if err != nil {
+		return nil
 	}
-	return zaiExpired("API key rejected — paste a fresh key from z.ai or bigmodel.cn")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("z.ai: request failed: %v", err)
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if zaiRejected(resp.StatusCode, body) {
+		return zaiExpired("API key rejected — paste a fresh key from z.ai")
+	}
+	if resp.StatusCode != 200 {
+		log.Printf("z.ai: unexpected status %d", resp.StatusCode)
+		return nil
+	}
+	return parseZaiUsage(body)
 }
 
 // ── Helpers ─────────────────────────────────────────────────

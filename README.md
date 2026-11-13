@@ -6,7 +6,7 @@ A simple macOS menu bar app to monitor AI usage limits in real-time.
 
 - **Claude Pro** — 5-hour session & weekly limits via Anthropic's OAuth usage API. Reads the token Claude Code stores in your macOS Keychain.
 - **OpenCode Go** — 5h rolling, weekly, monthly via the console status API
-- **Z.ai** — queries & token limits via API. Keys from z.ai and from BigModel (open.bigmodel.cn, the China console) both work
+- **Z.ai** — queries & token limits via API
 
 ## Install
 
@@ -29,7 +29,7 @@ Config file: `~/.dotoken.json`
 
 | Field | Description |
 |-------|-------------|
-| `zaiToken` | Z.ai or BigModel API bearer token |
+| `zaiToken` | Z.ai API bearer token |
 | `opencodeApiKey` | OpenCode API key from opencode.ai/auth |
 | `hideTrayLabel` | `true` to hide the usage % next to the menu bar icon |
 

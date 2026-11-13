@@ -8,10 +8,9 @@ import (
 
 const zaiOK = `{"code":200,"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":42}]}}`
 
-func zaiServer(t *testing.T, status int, body string, hits *int) *httptest.Server {
+func zaiServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*hits++
 		if r.URL.Path != "/api/monitor/usage/quota/limit" || r.Header.Get("Authorization") != "Bearer key" {
 			t.Errorf("unexpected request %s %q", r.URL.Path, r.Header.Get("Authorization"))
 		}
@@ -22,13 +21,12 @@ func zaiServer(t *testing.T, status int, body string, hits *int) *httptest.Serve
 	return srv
 }
 
-func withZaiHosts(t *testing.T, hosts ...string) {
+func withZaiURL(t *testing.T, url string) {
 	t.Helper()
-	saved := zaiHosts
-	zaiHosts = hosts
-	zaiHost.Store(0)
+	saved := zaiURL
+	zaiURL = url
 	t.Setenv("ZAI_TOKEN", "key")
-	t.Cleanup(func() { zaiHosts = saved; zaiHost.Store(0) })
+	t.Cleanup(func() { zaiURL = saved })
 }
 
 func TestZaiRejected(t *testing.T) {
@@ -51,27 +49,17 @@ func TestZaiRejected(t *testing.T) {
 	}
 }
 
-func TestFetchZaiUsageFallsBackToBigModel(t *testing.T) {
-	var zHits, bmHits int
-	z := zaiServer(t, 401, `{"code":1001}`, &zHits)
-	bm := zaiServer(t, 200, zaiOK, &bmHits)
-	withZaiHosts(t, z.URL, bm.URL)
+func TestFetchZaiUsageAccepted(t *testing.T) {
+	withZaiURL(t, zaiServer(t, 200, zaiOK).URL+"/api/monitor/usage/quota/limit")
 
 	got := fetchZaiUsage()
 	if got == nil || got.Expired || len(got.Metrics) != 1 || got.Metrics[0].Pct != 42 || got.Metrics[0].WindowMinutes != 300 {
 		t.Fatalf("fetchZaiUsage() = %+v", got)
 	}
-	fetchZaiUsage()
-	if zHits != 1 || bmHits != 2 {
-		t.Errorf("hits z.ai=%d bigmodel=%d, want 1 and 2", zHits, bmHits)
-	}
 }
 
-func TestFetchZaiUsageRejectedEverywhereIsExpired(t *testing.T) {
-	var zHits, bmHits int
-	z := zaiServer(t, 401, ``, &zHits)
-	bm := zaiServer(t, 200, `{"code":1003,"success":false}`, &bmHits)
-	withZaiHosts(t, z.URL, bm.URL)
+func TestFetchZaiUsageRejectedIsExpired(t *testing.T) {
+	withZaiURL(t, zaiServer(t, 401, `{"code":1001}`).URL+"/api/monitor/usage/quota/limit")
 
 	got := fetchZaiUsage()
 	if got == nil || !got.Expired || got.Name != "Z.ai" {
@@ -83,15 +71,9 @@ func TestFetchZaiUsageRejectedEverywhereIsExpired(t *testing.T) {
 }
 
 func TestFetchZaiUsageServerErrorIsSkipped(t *testing.T) {
-	var zHits, bmHits int
-	z := zaiServer(t, 502, `bad gateway`, &zHits)
-	bm := zaiServer(t, 200, zaiOK, &bmHits)
-	withZaiHosts(t, z.URL, bm.URL)
+	withZaiURL(t, zaiServer(t, 502, `bad gateway`).URL+"/api/monitor/usage/quota/limit")
 
 	if got := fetchZaiUsage(); got != nil {
 		t.Errorf("fetchZaiUsage() = %+v, want nil", got)
-	}
-	if bmHits != 0 {
-		t.Errorf("bigmodel hit %d times, want 0", bmHits)
 	}
 }
