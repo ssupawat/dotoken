@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTrayLabel(t *testing.T) {
@@ -295,5 +297,69 @@ func TestMergeClaudeCreds(t *testing.T) {
 	}
 	if _, err := mergeClaudeCreds([]byte(`{`), fresh); err == nil {
 		t.Error("mergeClaudeCreds() should error on malformed input")
+	}
+}
+
+func TestParseClaudeUsageResetsPerLimit(t *testing.T) {
+	session := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	weekly := time.Now().Add(72 * time.Hour).Truncate(time.Second)
+	body := fmt.Sprintf(`{"limits":[
+		{"kind":"session","percent":12,"resets_at":%q},
+		{"kind":"weekly_all","utilization":41,"resets_at":%q},
+		{"kind":"unknown","percent":99}
+	]}`, session.Format(time.RFC3339), weekly.Format(time.RFC3339))
+
+	p := parseClaudeUsage([]byte(body))
+	if p == nil || len(p.Metrics) != 2 {
+		t.Fatalf("parseClaudeUsage() = %+v, want 2 metrics", p)
+	}
+	if got, want := p.Metrics[0].ResetIn, formatResetTime(session.Unix()); got != want {
+		t.Errorf("session ResetIn = %q, want %q", got, want)
+	}
+	if got, want := p.Metrics[1].ResetIn, formatResetTime(weekly.Unix()); got != want {
+		t.Errorf("weekly ResetIn = %q, want %q", got, want)
+	}
+	if p.Metrics[0].ResetIn == p.Metrics[1].ResetIn {
+		t.Errorf("session and weekly should reset at different times, both %q", p.Metrics[0].ResetIn)
+	}
+	if p.ResetIn != p.Metrics[0].ResetIn {
+		t.Errorf("provider ResetIn = %q, want nearest %q", p.ResetIn, p.Metrics[0].ResetIn)
+	}
+}
+
+func TestParseClaudeUsageWithoutResetTime(t *testing.T) {
+	p := parseClaudeUsage([]byte(`{"limits":[{"kind":"session","percent":12}]}`))
+	if p == nil || len(p.Metrics) != 1 {
+		t.Fatalf("parseClaudeUsage() = %+v, want 1 metric", p)
+	}
+	if p.Metrics[0].ResetIn != "" || p.ResetIn != "" {
+		t.Errorf("expected no reset time, got metric %q provider %q", p.Metrics[0].ResetIn, p.ResetIn)
+	}
+}
+
+func TestParseZaiUsageResetsPerLimit(t *testing.T) {
+	soon := time.Now().Add(3 * time.Hour)
+	later := time.Now().Add(5 * 24 * time.Hour)
+	body := fmt.Sprintf(`{"data":{"limits":[
+		{"type":"TIME_LIMIT","unit":3,"number":5,"percentage":20,"nextResetTime":%d},
+		{"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":60,"nextResetTime":%d},
+		{"type":"OTHER","percentage":5,"nextResetTime":%d}
+	]}}`, soon.UnixMilli(), later.UnixMilli(), time.Now().Add(-time.Hour).UnixMilli())
+
+	p := parseZaiUsage([]byte(body))
+	if p == nil || len(p.Metrics) != 3 {
+		t.Fatalf("parseZaiUsage() = %+v, want 3 metrics", p)
+	}
+	if got, want := p.Metrics[0].ResetIn, formatResetTime(soon.UnixMilli()/1000); got != want {
+		t.Errorf("Queries ResetIn = %q, want %q", got, want)
+	}
+	if got, want := p.Metrics[1].ResetIn, formatResetTime(later.UnixMilli()/1000); got != want {
+		t.Errorf("Tokens ResetIn = %q, want %q", got, want)
+	}
+	if p.Metrics[2].ResetIn != "" {
+		t.Errorf("a reset in the past should be left blank, got %q", p.Metrics[2].ResetIn)
+	}
+	if p.ResetEpoch != soon.UnixMilli()/1000 {
+		t.Errorf("provider ResetEpoch = %d, want nearest %d", p.ResetEpoch, soon.UnixMilli()/1000)
 	}
 }

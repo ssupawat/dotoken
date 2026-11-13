@@ -155,6 +155,14 @@ export class Metric {
              */
             this["windowMinutes"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * ResetIn is when this limit resets (e.g. "3:04pm"); empty when unknown
+             * @member
+             * @type {string | undefined}
+             */
+            this["resetIn"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

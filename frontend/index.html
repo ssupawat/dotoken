@@ -126,7 +126,7 @@
   }
 
   /* ── Body ── */
-  .body { padding: 12px 0 4px; max-height: 280px; overflow-y: auto; }
+  .body { padding: 12px 0 4px; max-height: 340px; overflow-y: auto; }
 
   .body::-webkit-scrollbar,
   .settings-view::-webkit-scrollbar { width: 8px; }
@@ -245,6 +245,15 @@
   .crit .row-pct  { color: #ef4444; }
 
   /* ── Reset timer ── */
+  /* Sits under the bar column: row padding + label column + gap */
+  .row-reset {
+    padding: 0 18px 2px 100px;
+    margin-top: -3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .reset-row {
     padding: 3px 18px;
     display: flex;

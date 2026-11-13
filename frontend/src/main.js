@@ -27,6 +27,16 @@ function providerClass(name) {
   return '';
 }
 
+// Each limit resets on its own schedule, so show it under the bar
+function renderMetricReset(m) {
+  if (!m.resetIn) return '';
+  return `
+    <div class="row-reset">
+      <span class="reset-label">resets</span>
+      <span class="reset-time">${m.resetIn}</span>
+    </div>`;
+}
+
 function renderMetric(m, providerClass) {
   // Loading state (pct === -1)
   if (m.pct === -1) {
@@ -47,7 +57,7 @@ function renderMetric(m, providerClass) {
         <span class="row-label">${m.label}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${Math.min(m.pct, 100)}%"></div></div>
         <span class="row-pct">${Math.round(m.pct)}%</span>
-      </div>`;
+      </div>${renderMetricReset(m)}`;
   }
 
   // For Claude: show raw token counts instead of percentage
@@ -56,7 +66,7 @@ function renderMetric(m, providerClass) {
       <span class="row-label">${m.label}</span>
       <div class="bar-track"></div>
       <span class="row-pct" style="color:var(--dim);font-size:9px">${formatNumber(m.used)}</span>
-    </div>`;
+    </div>${renderMetricReset(m)}`;
 }
 
 function renderProvider(p) {
@@ -71,10 +81,11 @@ function renderProvider(p) {
     html += renderMetric(m, cls);
   }
 
-  if (p.resetIn) {
+  // Fall back to the provider's nearest reset when limits don't carry their own
+  if (p.resetIn && !p.metrics.some(m => m.resetIn)) {
     html += `
       <div class="reset-row">
-        <span class="reset-label">resets in</span>
+        <span class="reset-label">resets</span>
         <span class="reset-time">${p.resetIn}</span>
       </div>`;
   }
