@@ -798,7 +798,7 @@ type opencodeWindow struct {
 
 type opencodeUsageResponse struct {
 	UseBalance bool `json:"useBalance"`
-	Usage     struct {
+	Usage      struct {
 		Rolling opencodeWindow `json:"rolling"`
 		Weekly  opencodeWindow `json:"weekly"`
 		Monthly opencodeWindow `json:"monthly"`
@@ -925,31 +925,41 @@ func zaiWindowMinutes(limit zaiLimit) int {
 	return unit * limit.Number
 }
 
-func fetchZaiUsage() *ProviderUsage {
-	token := os.Getenv("ZAI_TOKEN")
-	if token == "" {
-		token = (&DoToken{}).GetSettings().ZaiToken
-	}
-	if token == "" {
-		return nil
-	}
+// zaiHosts serve the same quota API: z.ai for international keys and
+// open.bigmodel.cn for keys from the China console.
+var zaiHosts = []string{"https://api.z.ai", "https://open.bigmodel.cn"}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", "https://api.z.ai/api/monitor/usage/quota/limit", nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
+// zaiHost is the index of the host that last accepted the key, so each poll
+// asks it first instead of paying for a rejection on the other one.
+var zaiHost atomic.Int32
 
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("z.ai: request failed: %v", err)
-		return nil
+func zaiExpired(msg string) *ProviderUsage {
+	return &ProviderUsage{
+		Name:    "Z.ai",
+		Expired: true,
+		Metrics: []Metric{},
+		ResetIn: msg,
 	}
-	defer resp.Body.Close()
+}
 
+// zaiRejected reports whether a response means the key was not accepted.
+// The API answers with HTTP 401/403, or with a 1000–1004 auth code in the body.
+func zaiRejected(status int, body []byte) bool {
+	if status == 401 || status == 403 {
+		return true
+	}
+	var result struct {
+		Code int `json:"code"`
+	}
+	if json.Unmarshal(body, &result) != nil {
+		return false
+	}
+	return result.Code >= 1000 && result.Code <= 1004
+}
+
+func parseZaiUsage(body []byte) *ProviderUsage {
 	var result zaiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		log.Printf("z.ai: decode failed: %v", err)
 		return nil
 	}
@@ -994,6 +1004,47 @@ func fetchZaiUsage() *ProviderUsage {
 		ResetIn:    resetIn,
 		ResetEpoch: resetEpoch,
 	}
+}
+
+func fetchZaiUsage() *ProviderUsage {
+	token := os.Getenv("ZAI_TOKEN")
+	if token == "" {
+		token = (&DoToken{}).GetSettings().ZaiToken
+	}
+	if token == "" {
+		return nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	first := int(zaiHost.Load()) % len(zaiHosts)
+	for i := range zaiHosts {
+		idx := (first + i) % len(zaiHosts)
+		req, err := http.NewRequest("GET", zaiHosts[idx]+"/api/monitor/usage/quota/limit", nil)
+		if err != nil {
+			return nil
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("z.ai: request failed: %v", err)
+			return nil
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if zaiRejected(resp.StatusCode, body) {
+			// The key may belong to the other region's console
+			continue
+		}
+		if resp.StatusCode != 200 {
+			log.Printf("z.ai: unexpected status %d", resp.StatusCode)
+			return nil
+		}
+		zaiHost.Store(int32(idx))
+		return parseZaiUsage(body)
+	}
+	return zaiExpired("API key rejected — paste a fresh key from z.ai or bigmodel.cn")
 }
 
 // ── Helpers ─────────────────────────────────────────────────
