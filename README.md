@@ -16,7 +16,7 @@ curl -sL https://raw.githubusercontent.com/ssupawat/dotoken/main/install.sh | ba
 
 > On first run, macOS may show "cannot be opened because it is from an unidentified developer." Right-click DoToken.app → Open → click Open to bypass Gatekeeper.
 
-> For auto-start on login, add DoToken to **System Settings → General → Login Items**.
+> To start DoToken automatically, tick **Open DoToken at login** in the app's settings panel.
 
 ## Requirements
 
@@ -36,6 +36,8 @@ Config file: `~/.dotoken.json`
 Usage refreshes in the background every 5 minutes. The menu bar shows the highest usage % across all providers (e.g. `73%`), so you can see how close you are to a limit without opening the popup; a `!` means a provider needs you to sign in again.
 
 Settings can also be edited from the app's settings panel (tray menu → settings).
+
+The settings panel also has an **Open DoToken at login** switch. It registers DoToken with macOS as a login item, so you can also see or remove it under **System Settings → General → Login Items**.
 
 When a provider's session expires, the app shows a warning banner with how to fix it instead of silently hiding the card.
 

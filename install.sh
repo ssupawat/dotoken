@@ -15,4 +15,4 @@ mv /tmp/dotoken-install/DoToken.app /Applications/
 rm -rf /tmp/dotoken.zip /tmp/dotoken-install
 
 echo "DoToken installed to /Applications/DoToken.app"
-echo "Open it from Applications, or add it to System Settings → General → Login Items for auto-start."
+echo "Open it from Applications. To start it automatically, tick \"Open DoToken at login\" in its settings."
